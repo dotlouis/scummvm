@@ -739,7 +739,7 @@ static const MTropolisGameDescription gameDescriptions[] = {
 	  // Published by Emme, 1999
 		{
 			"albert2",
-			MetaEngineDetection::GAME_NOT_IMPLEMENTED,
+			"",
 			{
 				{"voyage.exe", 0, "0e513dac9d2a0d7cfcdc670cab2a9bda", 757760},
 				{"voyage1.MPL", 0, "174683d29a1c8511830262940223cc8a", 27889879},
@@ -753,7 +753,7 @@ static const MTropolisGameDescription gameDescriptions[] = {
 			},
 			Common::FR_FRA,
 			Common::kPlatformWindows,
-			ADGF_UNSUPPORTED,
+			ADGF_NO_FLAGS,
 			GUIO0()
 		},
 		GID_ALBERT2,
