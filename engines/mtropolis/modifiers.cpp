@@ -144,6 +144,7 @@ bool BehaviorModifier::load(ModifierLoaderContext &context, const Data::Behavior
 
 	_guid = data.guid;
 	_name = data.name;
+	debug(9, "MODINFO %x behavior '%s' enable %x/%x disable %x/%x", _guid, _name.c_str(), (uint)_enableWhen.eventType, _enableWhen.eventInfo, (uint)_disableWhen.eventType, _disableWhen.eventInfo); // DEBUG-TRACE
 	_modifierFlags.load(data.modifierFlags);
 	_switchable = ((data.behaviorFlags & Data::BehaviorModifier::kBehaviorFlagSwitchable) != 0);
 	_isEnabled = !_switchable;
@@ -292,12 +293,31 @@ void BehaviorModifier::visitInternalReferences(IStructuralReferenceVisitor* visi
 }
 
 // Miniscript modifier
+// DEBUG-TRACE: program dump for tools/msdecompile.py
+static void debugTraceProgram(uint32 guid, const Common::String &name, const Event &when, const Data::MiniscriptProgram &program) {
+	if (gDebugLevel < 9)
+		return;
+
+	Common::String d = Common::String::format("MSDUMP %x|%s|%x/%x|", guid, name.c_str(), (uint)when.eventType, when.eventInfo);
+	for (size_t i = 0; i < program.attributes.size(); i++)
+		d += (i ? "," : "") + program.attributes[i].name;
+	d += "|";
+	for (size_t i = 0; i < program.localRefs.size(); i++)
+		d += Common::String::format("%s%x:%s", i ? "," : "", program.localRefs[i].guid, program.localRefs[i].name.c_str());
+	d += Common::String::format("|%u|", (uint)program.numOfInstructions);
+	for (size_t i = 0; i < program.bytecode.size(); i++)
+		d += Common::String::format("%02x", program.bytecode[i]);
+	debug(9, "%s", d.c_str());
+}
+
 bool MiniscriptModifier::load(ModifierLoaderContext &context, const Data::MiniscriptModifier &data) {
 	if (!this->loadTypicalHeader(data.modHeader) || !_enableWhen.load(data.enableWhen))
 		return false;
 
 	if (!MiniscriptParser::parse(data.program, _program, _references))
 		return false;
+
+	debugTraceProgram(getStaticGUID(), getName(), _enableWhen, data.program);
 
 	return true;
 }
@@ -409,6 +429,7 @@ bool SaveAndRestoreModifier::load(ModifierLoaderContext &context, const Data::Sa
 	_filePath = data.filePath;
 	_fileName = data.fileName;
 
+	debug(9, "MODINFO %x saverestore '%s' save %x/%x restore %x/%x var '%s' file '%s' path '%s'", getStaticGUID(), getName().c_str(), (uint)_saveWhen.eventType, _saveWhen.eventInfo, (uint)_restoreWhen.eventType, _restoreWhen.eventInfo, data.varName.c_str(), _fileName.c_str(), _filePath.c_str()); // DEBUG-TRACE
 	return true;
 }
 
@@ -554,6 +575,7 @@ bool MessengerModifier::load(ModifierLoaderContext &context, const Data::Messeng
 	if (!_when.load(data.when) || !_sendSpec.load(data.send, data.messageFlags, data.with, data.withSource, data.withString, data.destination))
 		return false;
 
+	debug(9, "MODINFO %x messenger '%s' when %x/%x send %x/%x dest %x", getStaticGUID(), getName().c_str(), (uint)_when.eventType, _when.eventInfo, (uint)_sendSpec.send.eventType, _sendSpec.send.eventInfo, _sendSpec.destination); // DEBUG-TRACE
 	return true;
 }
 
@@ -2003,6 +2025,8 @@ bool IfMessengerModifier::load(ModifierLoaderContext &context, const Data::IfMes
 	if (!MiniscriptParser::parse(data.program, _program, _references))
 		return false;
 
+	debugTraceProgram(getStaticGUID(), "if:" + getName(), _when, data.program);
+	debug(9, "MODINFO %x ifmessenger '%s' when %x/%x send %x/%x dest %x", getStaticGUID(), getName().c_str(), (uint)_when.eventType, _when.eventInfo, (uint)_sendSpec.send.eventType, _sendSpec.send.eventInfo, _sendSpec.destination); // DEBUG-TRACE
 	return true;
 }
 
@@ -2089,6 +2113,7 @@ bool TimerMessengerModifier::load(ModifierLoaderContext &context, const Data::Ti
 	_milliseconds = data.minutes * (60 * 1000) + data.seconds * (1000) + data.hundredthsOfSeconds * 10;
 	_looping = ((data.messageAndTimerFlags & Data::TimerMessengerModifier::kTimerFlagLooping) != 0);
 
+	debug(9, "MODINFO %x timer '%s' when %x/%x stop %x/%x send %x/%x dest %x ms %u loop %d", getStaticGUID(), getName().c_str(), (uint)_executeWhen.eventType, _executeWhen.eventInfo, (uint)_terminateWhen.eventType, _terminateWhen.eventInfo, (uint)_sendSpec.send.eventType, _sendSpec.send.eventInfo, _sendSpec.destination, _milliseconds, _looping ? 1 : 0); // DEBUG-TRACE
 	return true;
 }
 
@@ -2309,6 +2334,7 @@ bool CollisionDetectionMessengerModifier::load(ModifierLoaderContext &context, c
 		return false;	// Unknown flag combination
 	}
 
+	debug(9, "MODINFO %x collision '%s' enable %x/%x disable %x/%x send %x/%x dest %x front %d behind %d noparent %d tocolliding %d first %d mode %d", getStaticGUID(), getName().c_str(), (uint)_enableWhen.eventType, _enableWhen.eventInfo, (uint)_disableWhen.eventType, _disableWhen.eventInfo, (uint)_sendSpec.send.eventType, _sendSpec.send.eventInfo, _sendSpec.destination, _detectInFront ? 1 : 0, _detectBehind ? 1 : 0, _ignoreParent ? 1 : 0, _sendToCollidingElement ? 1 : 0, _sendToOnlyFirstCollidingElement ? 1 : 0, (int)_detectionMode); // DEBUG-TRACE
 	return true;
 }
 

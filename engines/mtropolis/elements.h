@@ -217,6 +217,8 @@ public:
 	void debugInspect(IDebugInspectionReport *report) const override;
 #endif
 
+	Common::SharedPtr<Graphics::ManagedSurface> debugGetImage(); // DEBUG-AUTOPLAY
+
 private:
 	MiniscriptInstructionOutcome scriptSetFlushPriority(MiniscriptThread *thread, const DynamicValue &value);
 
@@ -250,6 +252,10 @@ public:
 	void render(Window *window) override;
 
 	bool isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) const override;
+
+	Common::String debugGetPlayState() const; // DEBUG-AUTOPLAY
+	uint32 debugGetCel() const { return _cel; } // DEBUG-AUTOPLAY
+	Common::String debugGetFrameRects() const; // DEBUG-AUTOPLAY
 
 	Common::Rect getRelativeCollisionRect() const override;
 

@@ -4,6 +4,7 @@ MODULE_OBJS = \
 	asset_factory.o \
 	assets.o \
 	audio_player.o \
+	autoplay.o \
 	boot.o \
 	core.o \
 	coroutine_exec.o \

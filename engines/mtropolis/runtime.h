@@ -1731,6 +1731,9 @@ public:
 
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	void debugSetEnabled(bool enabled);
+	Structural *debugFindMouseClickTarget(int32 x, int32 y); // DEBUG-AUTOPLAY
+	void debugExplainMouseTarget(int32 x, int32 y); // DEBUG-AUTOPLAY
+	bool debugIsMouseInteractive(Structural *structural); // DEBUG-AUTOPLAY
 	void debugBreak();
 	Debugger *debugGetDebugger() const;
 

@@ -43,6 +43,7 @@
 #include "mtropolis/mtropolis.h"
 
 #include "mtropolis/actions.h"
+#include "mtropolis/autoplay.h"
 #include "mtropolis/boot.h"
 #include "mtropolis/debug.h"
 #include "mtropolis/runtime.h"
@@ -341,8 +342,13 @@ Common::Error MTropolisEngine::run() {
 	}
 
 
+	AutoPlayer autoPlayer;
+
 	while (!shouldQuit()) {
 		handleEvents();
+
+		if (!autoPlayer.update(_runtime.get(), _system))
+			break;
 
 		if (!_runtime->runFrame())
 			break;
