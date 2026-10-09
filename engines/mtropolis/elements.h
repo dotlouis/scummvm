@@ -331,7 +331,7 @@ private:
 	bool _hasIssuedRenderWarning;
 };
 
-class TextLabelElement : public VisualElement {
+class TextLabelElement : public VisualElement, public IKeyboardEventReceiver {
 public:
 	TextLabelElement();
 	~TextLabelElement();
@@ -345,10 +345,14 @@ public:
 	MiniscriptInstructionOutcome writeRefAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib) override;
 	MiniscriptInstructionOutcome writeRefAttributeIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib, const DynamicValue &index) override;
 
+	VThreadState asyncConsumeCommand(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) override;
+
 	void activate() override;
 	void deactivate() override;
 
 	void render(Window *window) override;
+
+	void onKeyboardEvent(Runtime *runtime, const KeyboardInputEvent &keyEvt) override;
 
 	void setTextStyle(uint16 macFontID, const Common::String &fontFamilyName, uint size, TextAlignment alignment, const TextStyleFlags &styleFlags);
 
@@ -378,6 +382,10 @@ private:
 	bool findLineRange(size_t lineNum, uint32 &outStartPos, uint32 &outEndPos) const;
 	size_t countLines() const;
 
+	void updateCalculatedFields();
+	void setEditable(bool editable);
+	void onTextChanged();
+
 	bool _cacheBitmap;
 	bool _needsRender;
 
@@ -392,6 +400,9 @@ private:
 	TextStyleFlags _styleFlags;
 
 	Common::Array<MacFormattingSpan> _macFormattingSpans;
+
+	Common::SharedPtr<KeyboardEventSignaller> _keyboardSignaller;
+	bool _editReplacesText;
 
 	// NOTE: This may be a surface loaded from data, so it must not be altered.
 	// If you need to render again, recreate the surface.  If you want to change

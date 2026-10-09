@@ -1990,20 +1990,22 @@ MiniscriptInstructionOutcome MToonElement::scriptSetRate(MiniscriptThread *threa
 
 TextLabelElement::TextLabelElement()
 	: _cacheBitmap(false), _needsRender(false), _isBitmap(true), _assetID(0),
-	  _macFontID(0), _size(12), _alignment(kTextAlignmentLeft) {
+	  _macFontID(0), _size(12), _alignment(kTextAlignmentLeft), _editReplacesText(false) {
 }
 
 TextLabelElement::TextLabelElement(const TextLabelElement &other)
 	: VisualElement(other), _cacheBitmap(other._cacheBitmap), _needsRender(other._needsRender), _isBitmap(other._isBitmap)
 	, _assetID(other._assetID), _text(other._text), _macFontID(other._macFontID), _fontFamilyName(other._fontFamilyName)
 	, _size(other._size), _alignment(other._alignment), _styleFlags(other._styleFlags), _macFormattingSpans(other._macFormattingSpans)
-	, _renderedText(nullptr) {
+	, _editReplacesText(false), _renderedText(nullptr) {
 
 	if (other._isBitmap)
 		_renderedText = other._renderedText;
 }
 
 TextLabelElement::~TextLabelElement() {
+	if (_keyboardSignaller)
+		_keyboardSignaller->removeReceiver(this);
 }
 
 bool TextLabelElement::isTextLabel() const {
@@ -2106,6 +2108,157 @@ void TextLabelElement::activate() {
 }
 
 void TextLabelElement::deactivate() {
+	setEditable(false);
+}
+
+VThreadState TextLabelElement::asyncConsumeCommand(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
+	const Event &evt = msg->getEvent();
+
+	if (Event(EventIDs::kElementUpdatedCalculated, 0).respondsTo(evt)) {
+		updateCalculatedFields();
+		return kVThreadReturn;
+	}
+
+	if (Event(EventIDs::kElementEnableEdit, 0).respondsTo(evt)) {
+		setEditable(true);
+		return kVThreadReturn;
+	}
+
+	if (Event(EventIDs::kElementDisableEdit, 0).respondsTo(evt)) {
+		setEditable(false);
+		return kVThreadReturn;
+	}
+
+	return VisualElement::asyncConsumeCommand(runtime, msg);
+}
+
+void TextLabelElement::onKeyboardEvent(Runtime *runtime, const KeyboardInputEvent &keyEvt) {
+	if (keyEvt.getKeyEventType() != Common::EVENT_KEYDOWN)
+		return;
+
+	const Common::KeyState &keyState = keyEvt.getKeyState();
+
+	if (keyState.keycode == Common::KEYCODE_BACKSPACE) {
+		if (_text.empty())
+			return;
+
+		if (_editReplacesText)
+			_text.clear();
+		else
+			_text.deleteLastChar();
+
+		_editReplacesText = false;
+		onTextChanged();
+		return;
+	}
+
+	if (keyState.ascii < 0x20 || keyState.ascii == 0x7f || (keyState.flags & (Common::KBD_CTRL | Common::KBD_ALT | Common::KBD_META)) != 0)
+		return;
+
+	Common::CodePage codePage = (runtime->getProject()->getPlatform() == kProjectPlatformMacintosh) ? Common::kMacRoman : Common::kWindows1252;
+
+	Common::u32char_type_t ch = keyState.ascii;
+	Common::String encoded = Common::U32String(&ch, 1).encode(codePage);
+	if (encoded.size() != 1 || (encoded[0] == '?' && ch != '?'))
+		return;
+
+	if (_editReplacesText)
+		_text = encoded;
+	else
+		_text += encoded;
+
+	_editReplacesText = false;
+	onTextChanged();
+}
+
+void TextLabelElement::updateCalculatedFields() {
+	if (_isBitmap)
+		return;
+
+	Common::String newText;
+	bool changed = false;
+
+	size_t pos = 0;
+	while (pos < _text.size()) {
+		size_t fieldStart = _text.find('<', pos);
+		if (fieldStart == Common::String::npos)
+			break;
+
+		size_t fieldEnd = _text.find('>', fieldStart + 1);
+		if (fieldEnd == Common::String::npos)
+			break;
+
+		newText += _text.substr(pos, fieldStart - pos);
+		pos = fieldEnd + 1;
+
+		Common::String varName = _text.substr(fieldStart + 1, fieldEnd - fieldStart - 1);
+		Common::String formatted;
+		bool resolved = false;
+
+		Common::WeakPtr<RuntimeObject> varObjWeak;
+		if (!varName.empty() && VarReference(0, varName).resolve(this, varObjWeak)) {
+			RuntimeObject *varObj = varObjWeak.lock().get();
+			if (varObj && varObj->isModifier() && static_cast<Modifier *>(varObj)->isVariable()) {
+				DynamicValue value;
+				static_cast<VariableModifier *>(varObj)->varGetValue(value);
+
+				resolved = true;
+				switch (value.getType()) {
+				case DynamicValueTypes::kString:
+					formatted = value.getString();
+					break;
+				case DynamicValueTypes::kInteger:
+					formatted = Common::String::format("%i", static_cast<int>(value.getInt()));
+					break;
+				case DynamicValueTypes::kFloat:
+					formatted = Common::String::format("%g", value.getFloat());
+					break;
+				case DynamicValueTypes::kBoolean:
+					formatted = value.getBool() ? "true" : "false";
+					break;
+				case DynamicValueTypes::kPoint:
+					formatted = Common::String::format("(%i,%i)", static_cast<int>(value.getPoint().x), static_cast<int>(value.getPoint().y));
+					break;
+				default:
+					resolved = false;
+					break;
+				}
+			}
+		}
+
+		if (resolved) {
+			newText += formatted;
+			changed = true;
+		} else
+			newText += _text.substr(fieldStart, pos - fieldStart);
+	}
+
+	if (!changed)
+		return;
+
+	newText += _text.substr(pos);
+	_text = newText;
+	_editReplacesText = (_keyboardSignaller != nullptr);
+	onTextChanged();
+}
+
+void TextLabelElement::setEditable(bool editable) {
+	// There's no caret or selection support, so the existing text behaves as if it was selected
+	// and the first keystroke replaces it.
+	if (editable && !_keyboardSignaller) {
+		_keyboardSignaller = getRuntime()->getProject()->notifyOnKeyboardEvent(this);
+		_editReplacesText = true;
+	} else if (!editable && _keyboardSignaller) {
+		_keyboardSignaller->removeReceiver(this);
+		_keyboardSignaller.reset();
+	}
+}
+
+void TextLabelElement::onTextChanged() {
+	_needsRender = true;
+	_isBitmap = false;
+	_contentsDirty = true;
+	_macFormattingSpans.clear();
 }
 
 void TextLabelElement::render(Window *window) {
@@ -2328,6 +2481,7 @@ MiniscriptInstructionOutcome TextLabelElement::scriptSetText(MiniscriptThread *t
 	_isBitmap = false;
 	_contentsDirty = true;
 	_macFormattingSpans.clear();
+	_editReplacesText = (_keyboardSignaller != nullptr);
 
 	return kMiniscriptInstructionOutcomeContinue;
 }

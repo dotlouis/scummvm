@@ -295,7 +295,14 @@ public:
 #endif
 
 private:
+	struct InsertWriteInterface {
+		static MiniscriptInstructionOutcome write(MiniscriptThread *thread, const DynamicValue &dest, void *objectRef, uintptr ptrOrOffset);
+		static MiniscriptInstructionOutcome refAttrib(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib);
+		static MiniscriptInstructionOutcome refAttribIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib, const DynamicValue &index);
+	};
+
 	MiniscriptInstructionOutcome scriptSetCount(MiniscriptThread *thread, const DynamicValue &value);
+	MiniscriptInstructionOutcome scriptInsert(MiniscriptThread *thread, size_t index, const DynamicValue &value);
 
 	Common::SharedPtr<Modifier> shallowClone() const override;
 	const char *getDefaultName() const override;

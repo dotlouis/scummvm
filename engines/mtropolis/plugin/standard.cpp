@@ -1122,7 +1122,62 @@ MiniscriptInstructionOutcome ListVariableModifier::writeRefAttributeIndexed(Mini
 		storage->_list->createWriteProxyForIndex(realIndex, writeProxy);
 		writeProxy.containerList = storage->_list;
 		return kMiniscriptInstructionOutcomeContinue;
+	} else if (attrib == "insert") {
+		size_t realIndex = 0;
+		if (!storage->_list->dynamicValueToIndex(realIndex, index))
+			return kMiniscriptInstructionOutcomeFailed;
+
+		writeProxy.pod.ifc = DynamicValueWriteInterfaceGlue<InsertWriteInterface>::getInstance();
+		writeProxy.pod.objectRef = this;
+		writeProxy.pod.ptrOrOffset = realIndex;
+		return kMiniscriptInstructionOutcomeContinue;
 	}
+	return kMiniscriptInstructionOutcomeFailed;
+}
+
+MiniscriptInstructionOutcome ListVariableModifier::scriptInsert(MiniscriptThread *thread, size_t index, const DynamicValue &value) {
+	ListVariableStorage *storage = static_cast<ListVariableStorage *>(_storage.get());
+
+	DynamicValue convertedValue;
+	if (!value.dereference().convertToType(storage->_preferredContentType, convertedValue)) {
+		thread->error("Failed to convert value inserted into a list variable");
+		return kMiniscriptInstructionOutcomeFailed;
+	}
+
+	Common::SharedPtr<DynamicList> oldList = storage->_list;
+	Common::SharedPtr<DynamicList> newList(new DynamicList());
+	newList->forceType(oldList->getType());
+
+	size_t oldSize = oldList->getSize();
+	size_t destIndex = 0;
+	for (size_t i = 0; i < oldSize; i++) {
+		if (i == index)
+			destIndex++;
+
+		DynamicValue element;
+		oldList->getAtIndex(i, element);
+		if (!newList->setAtIndex(destIndex++, element))
+			return kMiniscriptInstructionOutcomeFailed;
+	}
+
+	if (!newList->setAtIndex(index, convertedValue)) {
+		thread->error("Failed to insert value into a list variable");
+		return kMiniscriptInstructionOutcomeFailed;
+	}
+
+	storage->_list = newList;
+	return kMiniscriptInstructionOutcomeContinue;
+}
+
+MiniscriptInstructionOutcome ListVariableModifier::InsertWriteInterface::write(MiniscriptThread *thread, const DynamicValue &dest, void *objectRef, uintptr ptrOrOffset) {
+	return static_cast<ListVariableModifier *>(objectRef)->scriptInsert(thread, ptrOrOffset, dest);
+}
+
+MiniscriptInstructionOutcome ListVariableModifier::InsertWriteInterface::refAttrib(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib) {
+	return kMiniscriptInstructionOutcomeFailed;
+}
+
+MiniscriptInstructionOutcome ListVariableModifier::InsertWriteInterface::refAttribIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib, const DynamicValue &index) {
 	return kMiniscriptInstructionOutcomeFailed;
 }
 

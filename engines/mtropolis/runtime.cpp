@@ -3051,6 +3051,10 @@ MiniscriptInstructionOutcome WorldManagerInterface::writeRefAttribute(Miniscript
 	} else if (attrib == "cursor") {
 		DynamicValueWriteFuncHelper<WorldManagerInterface, &WorldManagerInterface::setCursor, true>::create(this, result);
 		return kMiniscriptInstructionOutcomeContinue;
+	} else if (attrib == "cursorelement") {
+		// Not implemented, the element isn't used as the cursor
+		DynamicValueWriteDiscardHelper::create(result);
+		return kMiniscriptInstructionOutcomeContinue;
 	}
 	return RuntimeObject::writeRefAttribute(thread, result, attrib);
 }
