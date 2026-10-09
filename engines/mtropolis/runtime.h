@@ -2827,6 +2827,15 @@ private:
 	bool _isDirty;
 };
 
+// Supplies a bitmap that a visual element draws instead of its own contents.
+// Used by plug-ins such as the Hoologic Display Bitmap modifier.
+class IDisplayBitmapSource {
+public:
+	virtual ~IDisplayBitmapSource();
+
+	virtual Common::SharedPtr<Graphics::ManagedSurface> getDisplayBitmap() const = 0;
+};
+
 class VisualElement : public Element {
 public:
 	VisualElement();
@@ -2908,12 +2917,20 @@ public:
 
 	void pushVisibilityChangeTask(Runtime *runtime, bool desiredVisibility);
 
+	// Sets an object that supplies a bitmap to draw instead of the element contents, or clears it if null.
+	// The source object must implement IDisplayBitmapSource.
+	void setDisplayBitmapSource(const Common::WeakPtr<RuntimeObject> &source);
+	bool hasDisplayBitmapSource() const;
+
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	void debugInspect(IDebugInspectionReport *report) const override;
 #endif
 
 protected:
 	VisualElement(const VisualElement &other);
+
+	// Draws the display bitmap if a source is set, returns false if the element should render its own contents
+	bool renderDisplayBitmap(Window *window);
 
 	bool loadCommon(const Common::String &name, uint32 guid, const Data::Rect &rect, uint32 elementFlags, uint16 layer, uint32 streamLocator, uint16 sectionID);
 
@@ -2992,6 +3009,8 @@ protected:
 
 	Common::Rect _prevRect;
 	bool _contentsDirty;
+
+	Common::WeakPtr<RuntimeObject> _displayBitmapSource;
 };
 
 class NonVisualElement : public Element {

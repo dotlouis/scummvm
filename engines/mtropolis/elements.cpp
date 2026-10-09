@@ -80,6 +80,9 @@ MiniscriptInstructionOutcome GraphicElement::writeRefAttribute(MiniscriptThread 
 
 
 void GraphicElement::render(Window *window) {
+	if (_visible && renderDisplayBitmap(window))
+		return;
+
 	bool haveEffect = (_bottomRightBevelShading != 0 || _topLeftBevelShading != 0 || _interiorShading != 0);
 
 	if (!haveEffect) {
@@ -1257,6 +1260,9 @@ void ImageElement::tryAutoSetName(Runtime *runtime, Project *project) {
 }
 
 void ImageElement::render(Window *window) {
+	if (renderDisplayBitmap(window))
+		return;
+
 	if (_cachedImage) {
 		VisualElementRenderProperties::InkMode inkMode = _renderProps.getInkMode();
 

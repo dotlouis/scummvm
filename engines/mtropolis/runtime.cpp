@@ -9504,6 +9504,55 @@ void VisualElement::setShading(int16 topLeftBevelShading, int16 bottomRightBevel
 	}
 }
 
+IDisplayBitmapSource::~IDisplayBitmapSource() {
+}
+
+void VisualElement::setDisplayBitmapSource(const Common::WeakPtr<RuntimeObject> &source) {
+	_displayBitmapSource = source;
+	_contentsDirty = true;
+}
+
+bool VisualElement::hasDisplayBitmapSource() const {
+	return !_displayBitmapSource.expired();
+}
+
+bool VisualElement::renderDisplayBitmap(Window *window) {
+	Common::SharedPtr<RuntimeObject> sourceObj = _displayBitmapSource.lock();
+	if (!sourceObj)
+		return false;
+
+	IDisplayBitmapSource *source = dynamic_cast<IDisplayBitmapSource *>(sourceObj.get());
+	if (!source)
+		return false;
+
+	Common::SharedPtr<Graphics::ManagedSurface> bitmap = source->getDisplayBitmap();
+	if (!bitmap)
+		return true;
+
+	Graphics::ManagedSurface *dest = window->getSurface().get();
+	if (bitmap->format != dest->format)
+		return true;
+
+	// The bitmap is drawn at the element position and clipped to the element size
+	Common::Rect srcRect(MIN<int16>(bitmap->w, _rect.width()), MIN<int16>(bitmap->h, _rect.height()));
+	Common::Point destPoint = _cachedAbsoluteOrigin;
+	if (destPoint.x < 0) {
+		srcRect.left -= destPoint.x;
+		destPoint.x = 0;
+	}
+	if (destPoint.y < 0) {
+		srcRect.top -= destPoint.y;
+		destPoint.y = 0;
+	}
+	srcRect.right = MIN<int16>(srcRect.right, srcRect.left + dest->w - destPoint.x);
+	srcRect.bottom = MIN<int16>(srcRect.bottom, srcRect.top + dest->h - destPoint.y);
+
+	if (srcRect.isValidRect() && !srcRect.isEmpty())
+		dest->blitFrom(*bitmap, srcRect, destPoint);
+
+	return true;
+}
+
 bool VisualElement::needsRender() const {
 	if (_renderProps.isDirty() || _prevRect != _rect || _contentsDirty)
 		return true;

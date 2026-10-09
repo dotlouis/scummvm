@@ -31,20 +31,48 @@ namespace MTropolis {
 
 namespace Hoologic {
 
-class BitmapVariableModifier : public Modifier {
+class BitmapVariableStorage : public VariableStorage {
+public:
+	friend class BitmapVariableModifier;
+
+	Common::SharedPtr<ModifierSaveLoad> getSaveLoad(Runtime *runtime) override;
+
+	Common::SharedPtr<VariableStorage> clone() const override;
+
+private:
+	// Bitmaps aren't saved, the game recaptures them when needed
+	class SaveLoad : public ModifierSaveLoad {
+	private:
+		void commitLoad() const override;
+		void saveInternal(Common::WriteStream *stream) const override;
+		bool loadInternal(Common::ReadStream *stream, uint32 saveFileVersion) override;
+	};
+
+	// Bitmaps are never modified in place, so copies of a variable can share them
+	Common::SharedPtr<Graphics::ManagedSurface> _bitmap;
+};
+
+class BitmapVariableModifier : public VariableModifier, public IDisplayBitmapSource {
 public:
 	BitmapVariableModifier();
-	~BitmapVariableModifier();
 
 	bool load(const PlugInModifierLoaderContext &context, const Data::Hoologic::BitmapVariableModifier &data);
 
-	bool respondsToEvent(const Event &evt) const override;
-	VThreadState consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) override;
+	bool varSetValue(MiniscriptThread *thread, const DynamicValue &value) override;
+	void varGetValue(DynamicValue &dest) const override;
 
-	void disable(Runtime *runtime) override;
+	bool readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) override;
+
+	const Common::SharedPtr<Graphics::ManagedSurface> &getBitmap() const;
+	void setBitmap(const Common::SharedPtr<Graphics::ManagedSurface> &bitmap);
+
+	Common::SharedPtr<Graphics::ManagedSurface> getDisplayBitmap() const override;
+
+	static BitmapVariableModifier *resolve(const VarReference &varRef);
 
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	const char *debugGetTypeName() const override { return "BitmapVariable Modifier"; }
+	SupportStatus debugGetSupportStatus() const override { return kSupportStatusPartial; }
 	void debugInspect(IDebugInspectionReport *report) const override;
 #endif
 
@@ -65,14 +93,21 @@ public:
 
 	void disable(Runtime *runtime) override;
 
+	void linkInternalReferences(ObjectLinkingScope *scope) override;
+	void visitInternalReferences(IStructuralReferenceVisitor *visitor) override;
+
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	const char *debugGetTypeName() const override { return "CaptureBitmap Modifier"; }
+	SupportStatus debugGetSupportStatus() const override { return kSupportStatusPartial; }
 	void debugInspect(IDebugInspectionReport *report) const override;
 #endif
 
 private:
 	Common::SharedPtr<Modifier> shallowClone() const override;
 	const char *getDefaultName() const override;
+
+	Event _captureWhen;
+	VarReference _bitmapVar;
 };
 
 class ImportBitmapModifier : public Modifier {
@@ -109,14 +144,24 @@ public:
 
 	void disable(Runtime *runtime) override;
 
+	void linkInternalReferences(ObjectLinkingScope *scope) override;
+	void visitInternalReferences(IStructuralReferenceVisitor *visitor) override;
+
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	const char *debugGetTypeName() const override { return "DisplayBitmap Modifier"; }
+	SupportStatus debugGetSupportStatus() const override { return kSupportStatusPartial; }
 	void debugInspect(IDebugInspectionReport *report) const override;
 #endif
 
 private:
 	Common::SharedPtr<Modifier> shallowClone() const override;
 	const char *getDefaultName() const override;
+
+	void setDisplayed(Runtime *runtime, bool displayed);
+
+	Event _displayWhen;
+	Event _removeWhen;
+	VarReference _bitmapVar;
 };
 
 class ScaleBitmapModifier : public Modifier {
@@ -131,14 +176,21 @@ public:
 
 	void disable(Runtime *runtime) override;
 
+	void linkInternalReferences(ObjectLinkingScope *scope) override;
+	void visitInternalReferences(IStructuralReferenceVisitor *visitor) override;
+
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	const char *debugGetTypeName() const override { return "ScaleBitmap Modifier"; }
+	SupportStatus debugGetSupportStatus() const override { return kSupportStatusPartial; }
 	void debugInspect(IDebugInspectionReport *report) const override;
 #endif
 
 private:
 	Common::SharedPtr<Modifier> shallowClone() const override;
 	const char *getDefaultName() const override;
+
+	Event _scaleWhen;
+	VarReference _bitmapVar;
 };
 
 class SaveBitmapModifier : public Modifier {
@@ -248,7 +300,7 @@ private:
 	PlugInModifierFactory<KeyStateModifier, Data::Hoologic::KeyStateModifier> _keyStateModifierFactory;
 };
 
-} // End of namespace FTTS
+} // End of namespace Hoologic
 
 } // End of namespace MTropolis
 

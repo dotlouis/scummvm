@@ -40,7 +40,7 @@ DataReadErrorCode CaptureBitmapModifier::load(PlugIn &plugIn, const PlugInModifi
 	if (prefix.plugInRevision != 0)
 		return kDataReadErrorUnsupportedRevision;
 
-	if (!unknown1Event.load(reader) || !unknown2VarRef.load(reader))
+	if (!captureWhen.load(reader) || !bitmapVar.load(reader))
 		return kDataReadErrorReadFailed;
 
 	return kDataReadErrorNone;
@@ -60,7 +60,7 @@ DataReadErrorCode DisplayBitmapModifier::load(PlugIn &plugIn, const PlugInModifi
 	if (prefix.plugInRevision != 0)
 		return kDataReadErrorUnsupportedRevision;
 
-	if (!unknown1Event.load(reader) || !unknown2VarRef.load(reader) || !unknown3VarRef.load(reader))
+	if (!displayWhen.load(reader) || !removeWhen.load(reader) || !bitmapVar.load(reader))
 		return kDataReadErrorReadFailed;
 
 	return kDataReadErrorNone;
@@ -70,7 +70,7 @@ DataReadErrorCode ScaleBitmapModifier::load(PlugIn &plugIn, const PlugInModifier
 	if (prefix.plugInRevision != 0)
 		return kDataReadErrorUnsupportedRevision;
 
-	if (!unknown1Event.load(reader) || !unknown2VarRef.load(reader) || !unknown3IncomingData.load(reader) || !unknown4Int.load(reader))
+	if (!scaleWhen.load(reader) || !bitmapVar.load(reader) || !size.load(reader) || !unknown4Int.load(reader))
 		return kDataReadErrorReadFailed;
 
 	return kDataReadErrorNone;

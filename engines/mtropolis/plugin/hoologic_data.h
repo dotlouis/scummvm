@@ -33,12 +33,12 @@ namespace Hoologic {
 // Known Hoologic custom modifiers:
 // * Bitmap Suite
 // - hlBitmapVariable: variable storing a bitmap
-// - hlCaptureBitmap: captures a screen image into a bitmap
+// - hlCaptureBitmap: captures the screen area of its parent element into a bitmap
 // - hlPrintBitmap: print a bitmap
 // - hlSaveBitmap: saves a bitmap as a PICT/BMP file
 // - hlImportBitmap: load a bitmap from a PICT/BMP file
-// - hlDisplayBitmap: display a bitmap
-// - hlScaleBitmap: scale a bitmap
+// - hlDisplayBitmap: display a bitmap in place of its parent element contents
+// - hlScaleBitmap: scale a bitmap to a size
 //
 // * Painter Plugin
 // - hlPainter: Creates painting effects and interaction by blending several pictures together
@@ -56,8 +56,8 @@ protected:
 };
 
 struct CaptureBitmapModifier : public PlugInModifierData {
-	PlugInTypeTaggedValue unknown1Event;
-	PlugInTypeTaggedValue unknown2VarRef;
+	PlugInTypeTaggedValue captureWhen;
+	PlugInTypeTaggedValue bitmapVar;
 protected:
 	DataReadErrorCode load(PlugIn &plugIn, const PlugInModifier &prefix, DataReader &reader) override;
 };
@@ -73,17 +73,17 @@ protected:
 };
 
 struct DisplayBitmapModifier : public PlugInModifierData {
-	PlugInTypeTaggedValue unknown1Event;
-	PlugInTypeTaggedValue unknown2VarRef;
-	PlugInTypeTaggedValue unknown3VarRef;
+	PlugInTypeTaggedValue displayWhen;
+	PlugInTypeTaggedValue removeWhen;
+	PlugInTypeTaggedValue bitmapVar;
 protected:
 	DataReadErrorCode load(PlugIn &plugIn, const PlugInModifier &prefix, DataReader &reader) override;
 };
 
 struct ScaleBitmapModifier : public PlugInModifierData {
-	PlugInTypeTaggedValue unknown1Event;
-	PlugInTypeTaggedValue unknown2VarRef;
-	PlugInTypeTaggedValue unknown3IncomingData;
+	PlugInTypeTaggedValue scaleWhen;
+	PlugInTypeTaggedValue bitmapVar;
+	PlugInTypeTaggedValue size;
 	PlugInTypeTaggedValue unknown4Int;
 protected:
 	DataReadErrorCode load(PlugIn &plugIn, const PlugInModifier &prefix, DataReader &reader) override;
