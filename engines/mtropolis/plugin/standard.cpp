@@ -505,6 +505,7 @@ bool ObjectReferenceVariableModifier::load(const PlugInModifierLoaderContext &co
 
 	storage->_object.reset();
 
+	debug(9, "MODINFO %x objref '%s' settosourceparent %x/%x path '%s'", getStaticGUID(), getName().c_str(), (uint)_setToSourceParentWhen.eventType, _setToSourceParentWhen.eventInfo, storage->_objectPath.c_str()); // DEBUG-TRACE
 	return true;
 }
 

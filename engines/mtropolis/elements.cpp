@@ -1428,6 +1428,12 @@ bool ImageElement::isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) con
 	return !(r == transColorRGB8.r && g == transColorRGB8.g && b == transColorRGB8.b);
 }
 
+Common::SharedPtr<Graphics::ManagedSurface> ImageElement::debugGetImage() {
+	if (!_cachedImage)
+		return nullptr;
+	return _cachedImage->optimize(getRuntime());
+}
+
 Common::SharedPtr<Structural> ImageElement::shallowClone() const {
 	return Common::SharedPtr<Structural>(new ImageElement(*this));
 }
@@ -1715,6 +1721,24 @@ void MToonElement::render(Window *window) {
 			}
 		}
 	}
+}
+
+Common::String MToonElement::debugGetFrameRects() const {
+	Common::String result;
+	if (_metadata) {
+		for (uint i = 0; i < _metadata->frames.size(); i++) {
+			const Common::Rect &r = _metadata->frames[i].rect;
+			result += Common::String::format(" %u:(%d,%d)-(%d,%d)", i + 1, (int)r.left, (int)r.top, (int)r.right, (int)r.bottom);
+		}
+	}
+	return result;
+}
+
+Common::String MToonElement::debugGetPlayState() const {
+	Common::Rect frameRect;
+	if (_metadata && _renderedFrame < _metadata->frames.size())
+		frameRect = _metadata->frames[_renderedFrame].rect;
+	return Common::String::format("mtoon cel=%u frames=%u playing=%d stopped=%d range=%d..%d rate=%d hasSurface=%d rendered=%u frame=(%d,%d)-(%d,%d) surface=%dx%d mdrect=(%d,%d)-(%d,%d) reg=(%d,%d)", (uint)_cel, _metadata ? (uint)_metadata->frames.size() : 0u, _isPlaying ? 1 : 0, _isStopped ? 1 : 0, (int)_playRange.min, (int)_playRange.max, (int)_rateTimes100000, _renderSurface ? 1 : 0, (uint)_renderedFrame, (int)frameRect.left, (int)frameRect.top, (int)frameRect.right, (int)frameRect.bottom, _renderSurface ? (int)_renderSurface->w : 0, _renderSurface ? (int)_renderSurface->h : 0, _metadata ? (int)_metadata->rect.left : 0, _metadata ? (int)_metadata->rect.top : 0, _metadata ? (int)_metadata->rect.right : 0, _metadata ? (int)_metadata->rect.bottom : 0, _metadata ? (int)_metadata->registrationPoint.x : 0, _metadata ? (int)_metadata->registrationPoint.y : 0);
 }
 
 // An mToon authored at its natural size (the element is as large as the mToon) is stretched when a script resizes

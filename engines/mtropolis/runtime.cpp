@@ -4125,6 +4125,34 @@ MiniscriptInstructionOutcome Structural::scriptSetLoop(MiniscriptThread *thread,
 }
 
 MiniscriptInstructionOutcome Structural::scriptSetDebug(MiniscriptThread *thread, const DynamicValue &value) {
+	// DEBUG-TRACE: scripts write diagnostics to "debug"
+	if (gDebugLevel >= 9) {
+		Common::String str;
+		switch (value.getType()) {
+		case DynamicValueTypes::kString:
+			str = "\"" + value.getString() + "\"";
+			break;
+		case DynamicValueTypes::kInteger:
+			str = Common::String::format("%d", (int)value.getInt());
+			break;
+		case DynamicValueTypes::kFloat:
+			str = Common::String::format("%g", value.getFloat());
+			break;
+		case DynamicValueTypes::kBoolean:
+			str = value.getBool() ? "true" : "false";
+			break;
+		case DynamicValueTypes::kPoint:
+			str = Common::String::format("(%d,%d)", (int)value.getPoint().x, (int)value.getPoint().y);
+			break;
+		case DynamicValueTypes::kNull:
+			str = "null";
+			break;
+		default:
+			str = Common::String::format("type%d", (int)value.getType());
+			break;
+		}
+		debug(9, "DEBUGATTR '%s' %x from [%s] %x: %s", getName().c_str(), getStaticGUID(), thread->getModifier() ? thread->getModifier()->getName().c_str() : "", thread->getModifier() ? thread->getModifier()->getStaticGUID() : 0, str.c_str());
+	}
 	return kMiniscriptInstructionOutcomeContinue;
 }
 
@@ -4283,6 +4311,55 @@ SceneTransitionEffect::SceneTransitionEffect()
 	: _duration(100000), _steps(64), _transitionType(SceneTransitionTypes::kNone), _transitionDirection(SceneTransitionDirections::kUp) {
 }
 
+// DEBUG-TRACE: log author messages
+static Common::String debugTraceObjName(RuntimeObject *obj) {
+	if (!obj)
+		return "<null>";
+	if (obj->isStructural())
+		return Common::String::format("%s:%x", static_cast<Structural *>(obj)->getName().c_str(), obj->getStaticGUID());
+	if (obj->isModifier())
+		return Common::String::format("[%s]:%x", static_cast<Modifier *>(obj)->getName().c_str(), obj->getStaticGUID());
+	return "?";
+}
+
+// DEBUG-TRACE: author messages seen, for the autoplay driver
+Common::HashMap<uint32, uint32> g_debugAuthorMessagesSeen;
+
+static void debugTraceMessage(const Common::SharedPtr<MessageProperties> &msg, RuntimeObject *root) {
+	if (msg->getEvent().eventType == EventIDs::kAuthorMessage)
+		g_debugAuthorMessagesSeen[msg->getEvent().eventInfo]++;
+
+	if (gDebugLevel < 9 || msg->getEvent().eventType != EventIDs::kAuthorMessage)
+		return;
+
+	const DynamicValue &v = msg->getValue();
+	Common::String val;
+	switch (v.getType()) {
+	case DynamicValueTypes::kPoint:
+		val = Common::String::format("(%d,%d)", (int)v.getPoint().x, (int)v.getPoint().y);
+		break;
+	case DynamicValueTypes::kInteger:
+		val = Common::String::format("%d", (int)v.getInt());
+		break;
+	case DynamicValueTypes::kFloat:
+		val = Common::String::format("%g", v.getFloat());
+		break;
+	case DynamicValueTypes::kBoolean:
+		val = v.getBool() ? "true" : "false";
+		break;
+	case DynamicValueTypes::kString:
+		val = "\"" + v.getString() + "\"";
+		break;
+	case DynamicValueTypes::kNull:
+		val = "null";
+		break;
+	default:
+		val = Common::String::format("type%d", (int)v.getType());
+		break;
+	}
+	debug(9, "MSG %x to %s from %s value %s", msg->getEvent().eventInfo, debugTraceObjName(root).c_str(), debugTraceObjName(msg->getSource().lock().get()).c_str(), val.c_str());
+}
+
 MessageDispatch::MessageDispatch(const Common::SharedPtr<MessageProperties> &msgProps, Structural *root, bool cascade, bool relay, bool couldBeCommand)
 	: _cascade(cascade), _relay(relay), _msg(msgProps), _isCommand(false), _rootType(RootType::Structural) {
 	if (couldBeCommand && EventIDs::isCommand(msgProps->getEvent().eventType)) {
@@ -4291,6 +4368,7 @@ MessageDispatch::MessageDispatch(const Common::SharedPtr<MessageProperties> &msg
 	}
 
 	_root = root->getSelfReference();
+	debugTraceMessage(msgProps, root);
 }
 
 MessageDispatch::MessageDispatch(const Common::SharedPtr<MessageProperties> &msgProps, Modifier *root, bool cascade, bool relay, bool couldBeCommand)
@@ -4299,6 +4377,7 @@ MessageDispatch::MessageDispatch(const Common::SharedPtr<MessageProperties> &msg
 	// Apparently if a command message is sent to a modifier, it's handled as a message.
 	// SPQR depends on this to send "Element Select" messages to pick the palette.
 	_root = root->getSelfReference();
+	debugTraceMessage(msgProps, root);
 }
 
 const Common::SharedPtr<MessageProperties> &MessageDispatch::getMsg() const {
@@ -6024,10 +6103,69 @@ void Runtime::recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLa
 		recursiveFindMouseCollision(bestResult, bestLayer, bestStackHeight, bestDirect, child.get(), stackHeight, childRelativeX, childRelativeY, testType, cursorElement);
 }
 
+#ifdef MTROPOLIS_DEBUG_ENABLE
+// DEBUG-AUTOPLAY: the element a mouse click at (x, y) would go to, like the mouse down handling
+Structural *Runtime::debugFindMouseClickTarget(int32 x, int32 y) {
+	Structural *tracked = nullptr;
+	int32 bestLayer = INT32_MIN;
+	int32 bestStackHeight = INT32_MIN;
+	bool bestDirect = false;
+
+	for (size_t ri = 0; ri < _sceneStack.size(); ri++) {
+		const SceneStackEntry &sceneStackEntry = _sceneStack[_sceneStack.size() - 1 - ri];
+		recursiveFindMouseCollision(tracked, bestLayer, bestStackHeight, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, x, y, kMouseInteractivityTestMouseClick, _elementTrackedToCursor.lock().get());
+	}
+	return tracked;
+}
+
+// DEBUG-AUTOPLAY: log every visible element under (x, y) with the mouse target tests it passes
+static void debugExplainRecursive(Runtime *runtime, Structural *structural, int32 x, int32 y, int depth) {
+	int32 childX = x, childY = y;
+	if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+		VisualElement *visual = static_cast<VisualElement *>(structural);
+		const Common::Rect &r = visual->getRelativeRect();
+		if (visual->isVisible() && x >= r.left && x < r.right && y >= r.top && y < r.bottom) {
+			debug(1, "HITTEST %*s'%s' %x layer=%d direct=%d drawable=%d interactive=%d collision=%d", depth * 2, "", visual->getName().c_str(), visual->getStaticGUID(), (int)visual->getLayer(), visual->isDirectToScreen() ? 1 : 0,
+				visual->isMouseInsideDrawableArea(x, y) ? 1 : 0, runtime->debugIsMouseInteractive(visual) ? 1 : 0, visual->isMouseCollisionAtPoint(x, y) ? 1 : 0);
+		}
+		childX -= r.left;
+		childY -= r.top;
+	}
+	for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+		debugExplainRecursive(runtime, child.get(), childX, childY, depth + 1);
+}
+
+void Runtime::debugExplainMouseTarget(int32 x, int32 y) {
+	for (size_t ri = 0; ri < _sceneStack.size(); ri++)
+		debugExplainRecursive(this, _sceneStack[ri].scene.get(), x, y, 0);
+}
+
+bool Runtime::debugIsMouseInteractive(Structural *structural) {
+	return isStructuralMouseInteractive(structural, kMouseInteractivityTestMouseClick);
+}
+#endif
+
 void Runtime::queueEventAsLowLevelSceneStateTransitionAction(const Event &evt, Structural *root, bool cascade, bool relay) {
 	Common::SharedPtr<MessageProperties> props(new MessageProperties(evt, DynamicValue(), Common::WeakPtr<RuntimeObject>()));
 	Common::SharedPtr<MessageDispatch> msg(new MessageDispatch(props, root, cascade, relay, false));
 	_pendingLowLevelTransitions.push_back(LowLevelSceneStateTransitionAction(msg));
+}
+
+// DEBUG-TRACE: dump the structure of a scene (elements and their modifiers)
+static void debugTraceModifiers(const Common::Array<Common::SharedPtr<Modifier> > &mods, int depth) {
+	for (const Common::SharedPtr<Modifier> &mod : mods) {
+		debug(9, "TREE %*s- %s '%s' %x", depth * 2, "", mod->debugGetTypeName(), mod->getName().c_str(), mod->getStaticGUID());
+		IModifierContainer *container = mod->getChildContainer();
+		if (container)
+			debugTraceModifiers(container->getModifiers(), depth + 1);
+	}
+}
+
+static void debugTraceTree(Structural *structural, int depth) {
+	debug(9, "TREE %*s* %s '%s' %x", depth * 2, "", structural->debugGetTypeName(), structural->getName().c_str(), structural->getStaticGUID());
+	debugTraceModifiers(structural->getModifiers(), depth + 1);
+	for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+		debugTraceTree(child.get(), depth + 1);
 }
 
 void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
@@ -6049,6 +6187,8 @@ void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
 			debug(1, "Scene loaded OK, materializing objects...");
 			scene->materializeDescendents(this, subsection->getSceneLoadMaterializeScope());
 			debug(1, "Scene materialized OK");
+			if (gDebugLevel >= 9)
+				debugTraceTree(scene.get(), 0);
 		}
 
 		recursiveActivateStructural(scene.get());
@@ -6537,6 +6677,7 @@ VThreadState Runtime::updateMouseStateTask(const UpdateMouseStateTaskData &data)
 			recursiveFindMouseCollision(tracked, bestSceneStack, bestLayer, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, _cachedMousePosition.x, _cachedMousePosition.y, kMouseInteractivityTestMouseClick, _elementTrackedToCursor.lock().get());
 		}
 
+		debug(3, "MOUSEDOWN at (%d,%d) target '%s' %x", (int)_cachedMousePosition.x, (int)_cachedMousePosition.y, tracked ? tracked->getName().c_str() : "", tracked ? tracked->getStaticGUID() : 0); // DEBUG-TRACE
 		if (tracked) {
 			_mouseTrackingObject = tracked->getSelfReference().staticCast<Structural>();
 			_mouseTrackingDragStart = _cachedMousePosition;

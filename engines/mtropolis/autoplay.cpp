@@ -1,0 +1,2201 @@
+/* ScummVM - Graphic Adventure Engine
+ *
+ * ScummVM is the legal property of its developers, whose names
+ * are too numerous to list here. Please refer to the COPYRIGHT
+ * file distributed with this source distribution.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+#define FORBIDDEN_SYMBOL_EXCEPTION_getenv
+
+#include "common/events.h"
+#include "common/hashmap.h"
+#include "common/file.h"
+#include "common/fs.h"
+#include "common/keyboard.h"
+#include "common/system.h"
+#include "common/textconsole.h"
+
+#include "graphics/managed_surface.h"
+#include "graphics/palette.h"
+#include "graphics/paletteman.h"
+#include "graphics/surface.h"
+
+#include "image/png.h"
+
+#include "mtropolis/autoplay.h"
+#include "mtropolis/actions.h"
+#include "mtropolis/elements.h"
+#include "mtropolis/miniscript.h"
+#include "mtropolis/runtime.h"
+
+namespace MTropolis {
+
+extern Common::HashMap<uint32, uint32> g_debugAuthorMessagesSeen;
+
+static VisualElement *findVisualByName(Runtime *runtime, const char *name) {
+	Common::Array<Structural *> stack;
+	runtime->getScenesInRenderOrder(stack);
+	while (!stack.empty()) {
+		Structural *structural = stack.back();
+		stack.pop_back();
+		if (structural->isElement() && static_cast<Element *>(structural)->isVisual() && structural->getName().equalsIgnoreCase(name) && static_cast<VisualElement *>(structural)->isVisible())
+			return static_cast<VisualElement *>(structural);
+		for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+			stack.push_back(child.get());
+	}
+	return nullptr;
+}
+
+AutoPlayer::AutoPlayer() : _enabled(false), _readOffset(0), _skipLines(0), _clickWhenUntil(0), _clickWhenHovering(false), _clickWhenHoverStart(0), _dragHasFrom(false), _dragHasGrabOffset(false), _dragStep(0), _dragNext(0), _manilleActive(false), _manilleLastFuel(0), _manilleLastClick(0), _manilleNeedReplan(false), _manilleEscape(0), _manillePendingUntil(0), _manilleRefuelStart(0), _manilleMoving(false), _manilleGridW(0), _manilleGridH(0), _manilleIndex(0), _manilleStillSince(0), _manilleNextClick(0), _mouseOpIndex(0), _mouseOpNext(0), _sydneyUntil(0), _sydneyPhoto(false), _sydneyLeverNext(0), _sydneyLog(0), _tahitiUntil(0), _sacredUntil(0), _sacredNext(0), _tahitiNext(0), _tahitiTries(0), _borneoUntil(0), _borneoDragging(false), _borneoGrabTime(0), _nileUntil(0), _nileNext(0), _nileLastDir(0), _portUntil(0), _portNextAction(0), _waitUntil(0), _waitSceneUntil(0), _nextPollTime(0),
+	_releaseLeftButton(false), _mouseX(0), _mouseY(0) {
+	const char *path = getenv("MTROPOLIS_AUTOPLAY");
+	if (path && path[0]) {
+		_scriptPath = Common::Path(path, Common::Path::kNativeSeparator);
+		_enabled = true;
+		warning("AUTOPLAY: following command file '%s'", path);
+	}
+}
+
+bool AutoPlayer::isEnabled() const {
+	return _enabled;
+}
+
+void AutoPlayer::readNewLines() {
+	Common::FSNode node(_scriptPath);
+	Common::SeekableReadStream *stream = node.createReadStream();
+	if (!stream)
+		return;
+
+	if (stream->size() > _readOffset) {
+		stream->seek(_readOffset);
+		while (!stream->eos()) {
+			byte b = 0;
+			if (stream->read(&b, 1) != 1)
+				break;
+			_readOffset++;
+			if (b == '\n') {
+				_partialLine.trim();
+				if (!_partialLine.empty() && !_partialLine.hasPrefix("#"))
+					_pendingLines.push_back(_partialLine);
+				_partialLine.clear();
+			} else if (b != '\r') {
+				_partialLine += static_cast<char>(b);
+			}
+		}
+	}
+
+	delete stream;
+}
+
+bool AutoPlayer::update(Runtime *runtime, OSystem *system) {
+	if (!_enabled)
+		return true;
+
+	uint32 now = system->getMillis();
+
+	// A click is a press on one frame and a release on the next one, so the
+	// game sees both as separate events.
+	if (_releaseLeftButton) {
+		runtime->onMouseUp(_mouseX, _mouseY, Actions::kMouseButtonLeft);
+		_releaseLeftButton = false;
+		return true;
+	}
+
+	if (now >= _nextPollTime) {
+		readNewLines();
+		_nextPollTime = now + 100;
+	}
+
+	if (!_dragName.empty()) {
+		if (now >= _dragNext)
+			stepDrag(runtime, system, now);
+		return true;
+	}
+
+	if (runMouseQueue(runtime, system, now))
+		return true;
+
+	if (_sacredUntil) {
+		if (now >= _sacredUntil) {
+			warning("AUTOPLAY: sacred: timed out");
+			_sacredUntil = 0;
+		} else {
+			if (now >= _sacredNext)
+				playSacred(runtime, system, now);
+			return true;
+		}
+	}
+
+	if (_tahitiUntil) {
+		if (now >= _tahitiUntil) {
+			warning("AUTOPLAY: tahiti: timed out");
+			_tahitiUntil = 0;
+		} else {
+			if (now >= _tahitiNext)
+				playTahiti(runtime, system, now);
+			return true;
+		}
+	}
+
+	if (_sydneyUntil) {
+		if (now >= _sydneyUntil) {
+			warning("AUTOPLAY: sydney: timed out");
+			_sydneyUntil = 0;
+		} else {
+			playSydney(runtime, system, now);
+			return true;
+		}
+	}
+
+	if (_manillePendingUntil) {
+		// Start when the boat game is on screen
+		if (now >= _nileNext) {
+			_nileNext = now + 500;
+			if (findVisualByName(runtime, "map") && findVisualByName(runtime, "ile_croco") && findVisualByName(runtime, "ravitaillement1")) {
+				_manillePendingUntil = 0;
+				if (planManille(runtime)) {
+					_manilleActive = true;
+					_manilleRefueled[0] = _manilleRefueled[1] = false;
+					_manilleRefuelStart = 0;
+					_manilleIndex = 0;
+					_manilleStillSince = 0;
+					_manilleNextClick = 0;
+				}
+			} else if (now >= _manillePendingUntil) {
+				warning("AUTOPLAY: manille: the boat game didn't show up");
+				_manillePendingUntil = 0;
+			}
+		}
+		return true;
+	}
+
+	if (_manilleActive) {
+		if (now >= _nileNext) {
+			playManille(runtime, system, now);
+			_nileNext = now + 30;
+		}
+		return true;
+	}
+
+	if (_borneoUntil) {
+		if (g_debugAuthorMessagesSeen.contains(0x3df)) {
+			warning("AUTOPLAY: borneo game won");
+			if (_borneoDragging)
+				runtime->onMouseUp(_borneoMouse.x, _borneoMouse.y, Actions::kMouseButtonLeft);
+			_borneoUntil = 0;
+		} else if (now >= _borneoUntil) {
+			warning("AUTOPLAY: borneo game timed out");
+			if (_borneoDragging)
+				runtime->onMouseUp(_borneoMouse.x, _borneoMouse.y, Actions::kMouseButtonLeft);
+			_borneoUntil = 0;
+		} else {
+			if (now >= _nileNext) {
+				playBorneo(runtime, system, now);
+				_nileNext = now + 40;
+			}
+			return true;
+		}
+	}
+
+	if (_nileUntil) {
+		if (g_debugAuthorMessagesSeen.contains(0x3ba)) {
+			warning("AUTOPLAY: nile game won");
+			_nileUntil = 0;
+		} else if (now >= _nileUntil) {
+			warning("AUTOPLAY: nile game timed out");
+			_nileUntil = 0;
+		} else {
+			if (now >= _nileNext) {
+				playNile(runtime, system, now);
+				_nileNext = now + 40;
+			}
+			return true;
+		}
+	}
+
+	if (_portUntil) {
+		if (g_debugAuthorMessagesSeen.contains(0x3ba)) {
+			warning("AUTOPLAY: port game won");
+			_portUntil = 0;
+		} else if (now >= _portUntil) {
+			warning("AUTOPLAY: port game timed out");
+			_portUntil = 0;
+		} else {
+			playPort(runtime, system, now);
+			return true;
+		}
+	}
+
+	if (!_clickWhenName.empty()) {
+		Common::Point center;
+		if (findOnScreenElement(runtime, _clickWhenName, center, _clickWhenArea)) {
+			if (!_clickWhenHovering || now < _clickWhenHoverStart + 250) {
+				// Follow the target for a moment so that the game sees the mouse over it, then click
+				if (!_clickWhenHovering)
+					_clickWhenHoverStart = now;
+				_mouseX = center.x;
+				_mouseY = center.y;
+				system->warpMouse(center.x, center.y);
+				runtime->onMouseMove(center.x, center.y);
+				_clickWhenHovering = true;
+				return true;
+			}
+			warning("AUTOPLAY: clicked '%s' at (%d,%d)", _clickWhenName.c_str(), (int)center.x, (int)center.y);
+			_clickWhenName.clear();
+			_clickWhenHovering = false;
+			clickAt(runtime, system, center);
+			return true;
+		}
+		_clickWhenHovering = false;
+		if (now >= _clickWhenUntil) {
+			warning("AUTOPLAY: timed out waiting to click '%s'", _clickWhenName.c_str());
+			_clickWhenName.clear();
+		}
+		return true;
+	}
+
+	if (now < _waitUntil)
+		return true;
+
+	if (!_waitScene.empty()) {
+		Common::String sceneName = getSceneName(runtime);
+		if (sceneName.equalsIgnoreCase(_waitScene)) {
+			warning("AUTOPLAY: reached scene '%s'", sceneName.c_str());
+			_waitScene.clear();
+		} else if (now >= _waitSceneUntil) {
+			warning("AUTOPLAY: timed out waiting for scene '%s' (current: '%s')", _waitScene.c_str(), sceneName.c_str());
+			_waitScene.clear();
+		} else
+			return true;
+	}
+
+	// Run commands until one of them needs to wait for later frames
+	while (!_pendingLines.empty()) {
+		Common::String line = _pendingLines.front();
+		_pendingLines.remove_at(0);
+
+		if (_skipLines > 0) {
+			_skipLines--;
+			continue;
+		}
+
+		if (!executeLine(runtime, system, line))
+			return false;
+
+		if (_releaseLeftButton || now < _waitUntil || !_waitScene.empty() || !_clickWhenName.empty() || !_dragName.empty() || _portUntil || _nileUntil || _borneoUntil || _manilleActive || _manillePendingUntil ||
+				_sydneyUntil || _tahitiUntil || _sacredUntil || _mouseOpIndex < _mouseOps.size())
+			break;
+	}
+
+	return true;
+}
+
+static RuntimeObject *findModifierByGUID(const Common::Array<Common::SharedPtr<Modifier> > &modifiers, uint32 guid) {
+	for (const Common::SharedPtr<Modifier> &modifier : modifiers) {
+		if (modifier->getStaticGUID() == guid)
+			return modifier.get();
+		IModifierContainer *children = modifier->getChildContainer();
+		if (children) {
+			if (RuntimeObject *found = findModifierByGUID(children->getModifiers(), guid))
+				return found;
+		}
+	}
+	return nullptr;
+}
+
+static Modifier *findAnyModifier(const Common::Array<Common::SharedPtr<Modifier> > &modifiers) {
+	return modifiers.empty() ? nullptr : modifiers[0].get();
+}
+
+static Common::String describeValue(const DynamicValue &value) {
+	switch (value.getType()) {
+	case DynamicValueTypes::kString:
+		return "\"" + value.getString() + "\"";
+	case DynamicValueTypes::kInteger:
+		return Common::String::format("%d", (int)value.getInt());
+	case DynamicValueTypes::kFloat:
+		return Common::String::format("%g", value.getFloat());
+	case DynamicValueTypes::kBoolean:
+		return value.getBool() ? "true" : "false";
+	case DynamicValueTypes::kPoint:
+		return Common::String::format("(%d,%d)", (int)value.getPoint().x, (int)value.getPoint().y);
+	case DynamicValueTypes::kNull:
+		return "null";
+	case DynamicValueTypes::kObject: {
+		Common::SharedPtr<RuntimeObject> obj = value.getObject().object.lock();
+		if (!obj)
+			return "object (expired)";
+		Common::String name;
+		if (obj->isStructural())
+			name = static_cast<Structural *>(obj.get())->getName();
+		else if (obj->isModifier())
+			name = static_cast<Modifier *>(obj.get())->getName();
+		return Common::String::format("object '%s' %x", name.c_str(), obj->getStaticGUID());
+	}
+	case DynamicValueTypes::kList:
+		return Common::String::format("list of %u", static_cast<uint>(value.getList()->getSize()));
+	default:
+		return Common::String::format("type %d", (int)value.getType());
+	}
+}
+
+bool AutoPlayer::executeLine(Runtime *runtime, OSystem *system, const Common::String &line) {
+	warning("AUTOPLAY: %s", line.c_str());
+
+	Common::String cmd = line;
+	Common::String args;
+	size_t space = line.findFirstOf(' ');
+	if (space != Common::String::npos) {
+		cmd = line.substr(0, space);
+		args = line.substr(space + 1);
+		args.trim();
+	}
+
+	uint32 now = system->getMillis();
+
+	if (cmd == "wait") {
+		_waitUntil = now + atoi(args.c_str());
+	} else if (cmd == "move" || cmd == "click" || cmd == "down" || cmd == "up") {
+		int x = 0;
+		int y = 0;
+		if (sscanf(args.c_str(), "%d %d", &x, &y) != 2) {
+			warning("AUTOPLAY: bad coordinates '%s'", args.c_str());
+			return true;
+		}
+		_mouseX = x;
+		_mouseY = y;
+		system->warpMouse(x, y);
+		runtime->onMouseMove(x, y);
+		if (cmd == "click") {
+			runtime->onMouseDown(x, y, Actions::kMouseButtonLeft);
+			_releaseLeftButton = true;
+		} else if (cmd == "down") {
+			runtime->onMouseDown(x, y, Actions::kMouseButtonLeft);
+		} else if (cmd == "up") {
+			runtime->onMouseUp(x, y, Actions::kMouseButtonLeft);
+		}
+	} else if (cmd == "clickon") {
+		Common::Point center;
+		if (findOnScreenElement(runtime, args, center, Common::Rect(0, 0, 640, 480))) {
+			// Click the point nearest the center where the element is the one that gets the click
+			// (elements can be partly covered or transparent)
+			Common::Point best = center;
+			int32 bestDist = -1;
+			for (int32 y = MAX<int32>(center.y - 80, 0); y < MIN<int32>(center.y + 80, 480); y += 2) {
+				for (int32 x = MAX<int32>(center.x - 80, 0); x < MIN<int32>(center.x + 80, 640); x += 2) {
+					int32 dist = (x - center.x) * (x - center.x) + (y - center.y) * (y - center.y);
+					if (bestDist >= 0 && dist >= bestDist)
+						continue;
+					Structural *target = runtime->debugFindMouseClickTarget(x, y);
+					if (target && target->getName().equalsIgnoreCase(args)) {
+						best = Common::Point(x, y);
+						bestDist = dist;
+					}
+				}
+			}
+			if (bestDist < 0)
+				warning("AUTOPLAY: '%s' doesn't get clicks anywhere, clicking its center", args.c_str());
+			warning("AUTOPLAY: clicking '%s' at (%d,%d)", args.c_str(), (int)best.x, (int)best.y);
+			clickAt(runtime, system, best);
+		} else
+			warning("AUTOPLAY: no visible '%s' on screen", args.c_str());
+	} else if (cmd == "dragto") {
+		char name[128] = {0};
+		int x = 0, y = 0, fromX = 0, fromY = 0, grabX = 0, grabY = 0;
+		int n = sscanf(args.c_str(), "%127s %d %d %d %d %d %d", name, &x, &y, &fromX, &fromY, &grabX, &grabY);
+		if (n != 3 && n != 5 && n != 7) {
+			warning("AUTOPLAY: usage: dragto <name> <x> <y> [<nx> <ny> [<gx> <gy>]]");
+			return true;
+		}
+		_dragHasGrabOffset = (n == 7);
+		_dragGrabOffset = Common::Point(grabX, grabY);
+		_dragName = name;
+		_dragTarget = Common::Point(x, y);
+		_dragHasFrom = (n == 5);
+		_dragFrom = Common::Point(fromX, fromY);
+		_dragStep = 0;
+		_dragNext = now;
+	} else if (cmd == "clickwhen") {
+		char name[128] = {0};
+		int x1 = 0, y1 = 0, x2 = 640, y2 = 480, timeout = 30000;
+		int n = sscanf(args.c_str(), "%127s %d %d %d %d %d", name, &x1, &y1, &x2, &y2, &timeout);
+		if (n == 2)
+			timeout = x1, x1 = 0;
+		_clickWhenName = name;
+		_clickWhenArea = Common::Rect(x1, y1, x2, y2);
+		_clickWhenUntil = now + timeout;
+	} else if (cmd == "key") {
+		pressKey(runtime, args);
+	} else if (cmd == "type") {
+		for (uint i = 0; i < args.size(); i++)
+			pressKey(runtime, Common::String(args[i]));
+	} else if (cmd == "shot") {
+		saveScreenshot(system, args);
+	} else if (cmd == "scene") {
+		warning("AUTOPLAY: scene is '%s'", getSceneName(runtime).c_str());
+	} else if (cmd == "scenes") {
+		Structural *project = runtime->getProject();
+		for (const Common::SharedPtr<Structural> &section : project->getChildren())
+			for (const Common::SharedPtr<Structural> &subsection : section->getChildren())
+				for (const Common::SharedPtr<Structural> &scene : subsection->getChildren())
+					warning("AUTOPLAY: scene %s %x / %s %x / %s %x", section->getName().c_str(), section->getStaticGUID(), subsection->getName().c_str(), subsection->getStaticGUID(), scene->getName().c_str(), scene->getStaticGUID());
+	} else if (cmd == "goto") {
+		gotoScene(runtime, args);
+	} else if (cmd == "hide" || cmd == "show") {
+		uint32 guid = strtoul(args.c_str(), nullptr, 16);
+		Structural *structural = findStructural(runtime, guid);
+		if (structural && structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+			static_cast<VisualElement *>(structural)->setVisible(runtime, cmd == "show");
+			runtime->setSceneGraphDirty();
+		} else
+			warning("AUTOPLAY: no visual element with GUID %x", guid);
+	} else if (cmd == "skipif") {
+		uint msgID = 0;
+		uint numLines = 0;
+		if (sscanf(args.c_str(), "%x %u", &msgID, &numLines) == 2 && g_debugAuthorMessagesSeen.contains(msgID)) {
+			warning("AUTOPLAY: message %x was sent, skipping %u lines", msgID, numLines);
+			_skipLines = numLines;
+		}
+	} else if (cmd == "send") {
+		uint guid = 0;
+		uint msgID = 0;
+		Structural *structural = nullptr;
+		if (sscanf(args.c_str(), "%x %x", &guid, &msgID) == 2)
+			structural = findStructural(runtime, guid);
+		if (structural) {
+			Common::SharedPtr<MessageProperties> props(new MessageProperties(Event(EventIDs::kAuthorMessage, msgID), DynamicValue(), structural->getSelfReference()));
+			runtime->queueMessage(Common::SharedPtr<MessageDispatch>(new MessageDispatch(props, structural, true, true, false)));
+		} else
+			warning("AUTOPLAY: bad send '%s'", args.c_str());
+	} else if (cmd == "dumpimage") {
+		uint32 guid = 0;
+		char file[512] = {0};
+		if (sscanf(args.c_str(), "%x %511s", &guid, file) == 2) {
+			ImageElement *image = dynamic_cast<ImageElement *>(findStructural(runtime, guid));
+			Common::SharedPtr<Graphics::ManagedSurface> surf = image ? image->debugGetImage() : nullptr;
+			Common::DumpFile out;
+			if (!surf || !out.open(Common::Path(file, Common::Path::kNativeSeparator))) {
+				warning("AUTOPLAY: dumpimage: no image %x or can't write", guid);
+			} else {
+				if (surf->format.bytesPerPixel == 1) {
+					byte palette[256 * 3] = {};
+					if (surf->hasPalette()) {
+						surf->grabPalette(palette, 0, 256);
+					} else {
+						const Palette *pal = image->getPalette().get();
+						if (!pal)
+							pal = &runtime->getGlobalPalette();
+						memcpy(palette, pal->getPalette(), 256 * 3);
+					}
+					Image::writePNG(out, surf->rawSurface(), palette);
+				} else {
+					Image::writePNG(out, surf->rawSurface());
+				}
+				warning("AUTOPLAY: dumpimage: wrote %dx%d to %s", surf->w, surf->h, file);
+			}
+		}
+	} else if (cmd == "attr") {
+		uint32 guid = 0;
+		uint matchIndex = 1;
+		char path[256] = {0};
+		if (sscanf(args.c_str(), "%x#%u %255s", &guid, &matchIndex, path) != 3) {
+			matchIndex = 1;
+			if (sscanf(args.c_str(), "%x %255s", &guid, path) != 2) {
+				warning("AUTOPLAY: usage: attr <guid>[#n] <a.b.c>");
+				return true;
+			}
+		}
+		RuntimeObject *origin = nullptr;
+		Modifier *context = nullptr;
+		Common::Array<Structural *> stack;
+		runtime->getScenesInRenderOrder(stack);
+		uint matchesLeft = matchIndex;
+		while (!stack.empty() && !origin) {
+			Structural *structural = stack.back();
+			stack.pop_back();
+			RuntimeObject *found = nullptr;
+			if (structural->getStaticGUID() == guid)
+				found = structural;
+			else
+				found = findModifierByGUID(structural->getModifiers(), guid);
+			if (found && --matchesLeft == 0)
+				origin = found;
+			if (!context)
+				context = findAnyModifier(structural->getModifiers());
+			for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+				stack.push_back(child.get());
+		}
+		if (!origin || !context) {
+			warning("AUTOPLAY: attr: no object with GUID %x", guid);
+			return true;
+		}
+		if (origin->isModifier())
+			context = static_cast<Modifier *>(origin);
+
+		Common::SharedPtr<MessageProperties> props(new MessageProperties(Event(), DynamicValue(), Common::WeakPtr<RuntimeObject>()));
+		MiniscriptThread thread(runtime, props, nullptr, nullptr, context);
+		DynamicValue value;
+		value.setObject(origin->getSelfReference());
+		Common::String rest(path);
+		while (!rest.empty()) {
+			size_t dot = rest.findFirstOf('.');
+			Common::String attrib = rest.substr(0, dot);
+			rest = (dot == Common::String::npos) ? Common::String() : rest.substr(dot + 1);
+			Common::SharedPtr<RuntimeObject> obj = value.getType() == DynamicValueTypes::kObject ? value.getObject().object.lock() : nullptr;
+			if (!obj) {
+				warning("AUTOPLAY: attr %x %s: '%s' read from a non-object (%s)", guid, path, attrib.c_str(), describeValue(value).c_str());
+				return true;
+			}
+			DynamicValue next;
+			if (!obj->readAttribute(&thread, next, attrib)) {
+				warning("AUTOPLAY: attr %x %s: no attribute '%s'", guid, path, attrib.c_str());
+				return true;
+			}
+			value = next;
+		}
+		// A variable reads as itself: show its value
+		if (value.getType() == DynamicValueTypes::kObject) {
+			Common::SharedPtr<RuntimeObject> obj = value.getObject().object.lock();
+			if (obj && obj->isModifier() && static_cast<Modifier *>(obj.get())->isVariable()) {
+				DynamicValue varValue;
+				static_cast<VariableModifier *>(obj.get())->varGetValue(varValue);
+				if (varValue.getType() != DynamicValueTypes::kObject || varValue.getObject().object.lock() != obj)
+					value = varValue;
+			}
+		}
+		warning("AUTOPLAY: attr %x %s = %s", guid, path, describeValue(value).c_str());
+	} else if (cmd == "info") {
+		uint32 guid = strtoul(args.c_str(), nullptr, 16);
+		Common::Array<Structural *> stack;
+		stack.push_back(runtime->getProject());
+		while (!stack.empty()) {
+			Structural *structural = stack.back();
+			stack.pop_back();
+			if (structural->getStaticGUID() == guid) {
+				Common::String chain;
+				for (Structural *parent = structural->getParent(); parent; parent = parent->getParent())
+					chain = parent->getName() + "/" + chain;
+				Common::String state = "not visual";
+				if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+					VisualElement *visual = static_cast<VisualElement *>(structural);
+					Common::Point pos = visual->getGlobalPosition();
+					state = Common::String::format("visible=%d layer=%u at (%d,%d) size %dx%d ink=%x", visual->isVisible() ? 1 : 0, (uint)visual->getLayer(), (int)pos.x, (int)pos.y, (int)visual->getRelativeRect().width(), (int)visual->getRelativeRect().height(), (uint)visual->getRenderProperties().getInkMode());
+					if (MToonElement *mtoon = dynamic_cast<MToonElement *>(visual))
+						state += " " + mtoon->debugGetPlayState();
+				}
+				warning("AUTOPLAY: info %x '%s' in %s %s", guid, structural->getName().c_str(), chain.c_str(), state.c_str());
+			}
+			for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+				stack.push_back(child.get());
+		}
+	} else if (cmd == "hotspots") {
+		logHotspots(runtime);
+	} else if (cmd == "elements") {
+		logElements(runtime);
+	} else if (cmd == "port") {
+		uint32 timeout = args.empty() ? 300000 : atoi(args.c_str());
+		_portUntil = now + timeout;
+		_portNextAction = 0;
+		_portLastStamp.clear();
+	} else if (cmd == "manille") {
+		_manillePendingUntil = now + 30000;
+	} else if (cmd == "manille_now") {
+		if (planManille(runtime)) {
+			_manilleActive = true;
+			_manilleRefueled[0] = _manilleRefueled[1] = false;
+			_manilleRefuelStart = 0;
+			_manilleIndex = 0;
+			_manilleStillSince = 0;
+			_manilleNextClick = 0;
+			_nileNext = 0;
+		}
+	} else if (cmd == "borneo") {
+		g_debugAuthorMessagesSeen.erase(0x3df);
+		_borneoUntil = now + (args.empty() ? 600000 : atoi(args.c_str()));
+		_borneoDragging = false;
+		_nileNext = 0;
+	} else if (cmd == "mexico") {
+		// The memory test of 08-C-mexico: click the jewels in the order of zone_lampes' List_light (1 black,
+		// 2 green, 3 blue, 4 yellow, 5 white); a lit jewel ignores clicks for 2.8 s, so they are 3.2 s apart
+		static const char *const kLamps[5] = {"lampe_black", "lampe_green", "lampe_blue", "lampe_yellow", "lampe_white"};
+		VisualElement *zone = findVisualByName(runtime, "zone_lampes");
+		Modifier *list = nullptr;
+		if (zone) {
+			for (const Common::SharedPtr<Modifier> &mod : zone->getModifiers()) {
+				if (mod->isVariable() && mod->getName().equalsIgnoreCase("List_light"))
+					list = mod.get();
+			}
+		}
+		DynamicValue count;
+		Common::SharedPtr<MessageProperties> props(new MessageProperties(Event(), DynamicValue(), Common::WeakPtr<RuntimeObject>()));
+		MiniscriptThread thread(runtime, props, nullptr, nullptr, nullptr);
+		if (!list || !list->readAttribute(&thread, count, "count") || count.getType() != DynamicValueTypes::kInteger) {
+			warning("AUTOPLAY: mexico: no List_light");
+		} else {
+			int prev = -1;
+			for (int32 i = 1; i <= count.getInt(); i++) {
+				DynamicValue index, v;
+				index.setInt(i);
+				list->readAttributeIndexed(&thread, v, "value", index);
+				int lamp = (v.getType() == DynamicValueTypes::kInteger) ? (int)v.getInt() - 1 : -1;
+				VisualElement *element = (lamp >= 0 && lamp < 5) ? findVisualByName(runtime, kLamps[lamp]) : nullptr;
+				if (!element)
+					continue;
+				Common::Point c = element->getGlobalPosition();
+				c.x += element->getRelativeRect().width() / 2;
+				c.y += element->getRelativeRect().height() / 2;
+				warning("AUTOPLAY: mexico: %d: %s", (int)i, kLamps[lamp]);
+				if (prev >= 0)
+					queueMouse(3, 0, 0, 3200);
+				queueMouse(1, c.x, c.y, 50);
+				queueMouse(2, c.x, c.y, 50);
+				prev = lamp;
+			}
+		}
+	} else if (cmd == "sacred") {
+		_sacredUntil = now + (args.empty() ? 120000 : atoi(args.c_str()));
+		_sacredNext = 0;
+	} else if (cmd == "mtoonframes") {
+		// mtoonframes <guid>: the frame rects of an mToon element
+		uint32 guid = strtoul(args.c_str(), nullptr, 16);
+		Common::Array<Structural *> stack;
+		runtime->getScenesInRenderOrder(stack);
+		while (!stack.empty()) {
+			Structural *st = stack.back();
+			stack.pop_back();
+			for (const Common::SharedPtr<Structural> &child : st->getChildren())
+				stack.push_back(child.get());
+			MToonElement *mt = dynamic_cast<MToonElement *>(st);
+			if (mt && mt->getStaticGUID() == guid) {
+				warning("AUTOPLAY: mtoonframes %x: %s", guid, mt->debugGetFrameRects().c_str());
+				break;
+			}
+		}
+	} else if (cmd == "hittest") {
+		int x = 0, y = 0;
+		sscanf(args.c_str(), "%d %d", &x, &y);
+		runtime->debugExplainMouseTarget(x, y);
+	} else if (cmd == "tahiti") {
+		_tahitiUntil = now + (args.empty() ? 300000 : atoi(args.c_str()));
+		_tahitiNext = 0;
+		_tahitiTries = 0;
+	} else if (cmd == "sydney") {
+		_sydneyUntil = now + (args.empty() ? 900000 : atoi(args.c_str()));
+		_sydneyPhoto = false;
+		_sydneyLeverNext = 0;
+		_sydneyLog = 0;
+	} else if (cmd == "nile") {
+		g_debugAuthorMessagesSeen.erase(0x3ba);
+		_nileUntil = now + (args.empty() ? 400000 : atoi(args.c_str()));
+		_nileNext = 0;
+	} else if (cmd == "waitscene") {
+		Common::String name = args;
+		uint32 timeout = 60000;
+		size_t sp = args.findFirstOf(' ');
+		if (sp != Common::String::npos) {
+			name = args.substr(0, sp);
+			timeout = atoi(args.substr(sp + 1).c_str());
+		}
+		_waitScene = name;
+		_waitSceneUntil = now + timeout;
+	} else if (cmd == "quit") {
+		return false;
+	} else {
+		warning("AUTOPLAY: unknown command '%s'", cmd.c_str());
+	}
+
+	return true;
+}
+
+void AutoPlayer::pressKey(Runtime *runtime, const Common::String &keyName) {
+	Common::KeyState ks;
+	if (keyName.size() == 1) {
+		char c = keyName[0];
+		ks = Common::KeyState(static_cast<Common::KeyCode>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c), static_cast<byte>(c));
+	} else if (keyName.equalsIgnoreCase("esc")) {
+		ks = Common::KeyState(Common::KEYCODE_ESCAPE, Common::ASCII_ESCAPE);
+	} else if (keyName.equalsIgnoreCase("enter")) {
+		ks = Common::KeyState(Common::KEYCODE_RETURN, Common::ASCII_RETURN);
+	} else if (keyName.equalsIgnoreCase("backspace")) {
+		ks = Common::KeyState(Common::KEYCODE_BACKSPACE, Common::ASCII_BACKSPACE);
+	} else if (keyName.equalsIgnoreCase("tab")) {
+		ks = Common::KeyState(Common::KEYCODE_TAB, Common::ASCII_TAB);
+	} else if (keyName.equalsIgnoreCase("space")) {
+		ks = Common::KeyState(Common::KEYCODE_SPACE, ' ');
+	} else if (keyName.equalsIgnoreCase("up")) {
+		ks = Common::KeyState(Common::KEYCODE_UP);
+	} else if (keyName.equalsIgnoreCase("down")) {
+		ks = Common::KeyState(Common::KEYCODE_DOWN);
+	} else if (keyName.equalsIgnoreCase("left")) {
+		ks = Common::KeyState(Common::KEYCODE_LEFT);
+	} else if (keyName.equalsIgnoreCase("right")) {
+		ks = Common::KeyState(Common::KEYCODE_RIGHT);
+	} else {
+		warning("AUTOPLAY: unknown key '%s'", keyName.c_str());
+		return;
+	}
+
+	runtime->onKeyboardEvent(Common::EVENT_KEYDOWN, false, ks);
+	runtime->onKeyboardEvent(Common::EVENT_KEYUP, false, ks);
+}
+
+void AutoPlayer::saveScreenshot(OSystem *system, const Common::String &fileName) {
+	Graphics::Surface *screen = system->lockScreen();
+	if (!screen) {
+		warning("AUTOPLAY: could not lock the screen");
+		return;
+	}
+
+	Graphics::Surface copy;
+	copy.copyFrom(*screen);
+	system->unlockScreen();
+
+	Common::DumpFile out;
+	if (!out.open(Common::Path(fileName, Common::Path::kNativeSeparator))) {
+		warning("AUTOPLAY: could not open '%s' for writing", fileName.c_str());
+		copy.free();
+		return;
+	}
+
+	bool ok;
+	if (copy.format.bytesPerPixel == 1) {
+		byte palette[256 * 3];
+		system->getPaletteManager()->grabPalette(palette, 0, 256);
+
+		// Distinct indices help tell an all-white palette from an all-white picture
+		bool used[256] = {};
+		uint numUsed = 0;
+		for (int y = 0; y < copy.h; y++) {
+			const byte *row = static_cast<const byte *>(copy.getBasePtr(0, y));
+			for (int x = 0; x < copy.w; x++) {
+				if (!used[row[x]]) {
+					used[row[x]] = true;
+					numUsed++;
+				}
+			}
+		}
+		warning("AUTOPLAY: 8-bit screen uses %u palette indices", numUsed);
+		ok = Image::writePNG(out, copy, palette);
+	} else
+		ok = Image::writePNG(out, copy);
+
+	out.finalize();
+	copy.free();
+
+	if (ok)
+		warning("AUTOPLAY: saved screenshot '%s'", fileName.c_str());
+	else
+		warning("AUTOPLAY: failed to encode screenshot '%s'", fileName.c_str());
+}
+
+Common::String AutoPlayer::getSceneName(Runtime *runtime) const {
+	const Common::SharedPtr<Structural> &scene = runtime->getActiveMainScene();
+	if (!scene)
+		return Common::String();
+	return scene->getName();
+}
+
+static void logElementTree(Structural *structural, int depth) {
+	if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+		VisualElement *element = static_cast<VisualElement *>(structural);
+		if (!element->isVisible())
+			return;
+
+		Common::Point pos = element->getGlobalPosition();
+		const Common::Rect &rect = element->getRelativeRect();
+		const VisualElementRenderProperties &props = element->getRenderProperties();
+		warning("AUTOPLAY: %*s%s '%s' %x layer=%u at (%d,%d) size %dx%d ink=%x fore=%02x%02x%02x back=%02x%02x%02x%s", depth * 2, "", element->debugGetTypeName(), element->getName().c_str(),
+				element->getStaticGUID(), (uint)element->getLayer(), (int)pos.x, (int)pos.y, (int)rect.width(), (int)rect.height(),
+				(uint)props.getInkMode(), props.getForeColor().r, props.getForeColor().g, props.getForeColor().b,
+				props.getBackColor().r, props.getBackColor().g, props.getBackColor().b,
+				element->hasDisplayBitmapSource() ? " [bitmap]" : "");
+	}
+
+	for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+		logElementTree(child.get(), depth + 1);
+}
+
+void AutoPlayer::gotoScene(Runtime *runtime, const Common::String &sceneName) {
+	// Scenes are the children of subsections, which are the children of sections
+	Structural *project = runtime->getProject();
+	if (project) {
+		for (const Common::SharedPtr<Structural> &section : project->getChildren()) {
+			for (const Common::SharedPtr<Structural> &subsection : section->getChildren()) {
+				for (const Common::SharedPtr<Structural> &scene : subsection->getChildren()) {
+					if (scene->getName().equalsIgnoreCase(sceneName)) {
+						runtime->addSceneStateTransition(HighLevelSceneTransition(scene, HighLevelSceneTransition::kTypeChangeToScene, false, false));
+						return;
+					}
+				}
+			}
+		}
+	}
+
+	warning("AUTOPLAY: scene '%s' not found", sceneName.c_str());
+}
+
+// Returns the mouse events that active modifiers in the container respond to
+static Common::String mouseEventsHandled(const Common::Array<Common::SharedPtr<Modifier> > &modifiers) {
+	static const struct {
+		EventIDs::EventID id;
+		const char *name;
+	} mouseEvents[] = {
+		{EventIDs::kMouseDown, "down"},
+		{EventIDs::kMouseUp, "up"},
+		{EventIDs::kMouseUpInside, "upinside"},
+		{EventIDs::kMouseOver, "over"},
+		{EventIDs::kMouseOutside, "outside"},
+		{EventIDs::kMouseTrackedInside, "tracked"},
+		{EventIDs::kMouseTracking, "tracking"},
+	};
+
+	Common::String result;
+	for (const Common::SharedPtr<Modifier> &modifier : modifiers) {
+		for (const auto &mouseEvent : mouseEvents) {
+			if (modifier->respondsToEvent(Event(mouseEvent.id, 0)) && !result.contains(mouseEvent.name))
+				result += Common::String(result.empty() ? "" : ",") + mouseEvent.name;
+		}
+
+		// Disabled behaviors don't propagate messages to their children
+		IModifierContainer *container = modifier->getMessagePropagationContainer();
+		if (container) {
+			Common::String childResult = mouseEventsHandled(container->getModifiers());
+			if (!childResult.empty() && !result.contains(childResult))
+				result += Common::String(result.empty() ? "" : ",") + childResult;
+		}
+	}
+	return result;
+}
+
+static void logHotspotTree(Structural *structural) {
+	if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+		VisualElement *element = static_cast<VisualElement *>(structural);
+		if (!element->isVisible())
+			return;
+
+		Common::String events = mouseEventsHandled(element->getModifiers());
+		if (!events.empty()) {
+			Common::Point pos = element->getGlobalPosition();
+			const Common::Rect &rect = element->getRelativeRect();
+			warning("AUTOPLAY: hotspot '%s' %x layer=%u rect (%d,%d)-(%d,%d) center (%d,%d) [%s]", element->getName().c_str(), element->getStaticGUID(), (uint)element->getLayer(),
+					(int)pos.x, (int)pos.y, (int)pos.x + rect.width(), (int)pos.y + rect.height(), (int)pos.x + rect.width() / 2, (int)pos.y + rect.height() / 2, events.c_str());
+		}
+	}
+
+	for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+		logHotspotTree(child.get());
+}
+
+void AutoPlayer::logHotspots(Runtime *runtime) const {
+	Common::Array<Structural *> scenes;
+	runtime->getScenesInRenderOrder(scenes);
+	for (Structural *scene : scenes)
+		logHotspotTree(scene);
+}
+
+void AutoPlayer::clickAt(Runtime *runtime, OSystem *system, const Common::Point &point) {
+	_mouseX = point.x;
+	_mouseY = point.y;
+	system->warpMouse(point.x, point.y);
+	runtime->onMouseMove(point.x, point.y);
+	runtime->onMouseDown(point.x, point.y, Actions::kMouseButtonLeft);
+	_releaseLeftButton = true;
+}
+
+bool AutoPlayer::findOnScreenElement(Runtime *runtime, const Common::String &name, Common::Point &outCenter, const Common::Rect &area) const {
+	Common::Array<Structural *> stack;
+	runtime->getScenesInRenderOrder(stack);
+	while (!stack.empty()) {
+		Structural *structural = stack.back();
+		stack.pop_back();
+		if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+			VisualElement *visual = static_cast<VisualElement *>(structural);
+			if (!visual->isVisible())
+				continue;
+			if (visual->getName().equalsIgnoreCase(name)) {
+				Common::Point pos = visual->getGlobalPosition();
+				const Common::Rect &rect = visual->getRelativeRect();
+				Common::Point center(pos.x + rect.width() / 2, pos.y + rect.height() / 2);
+				if (area.contains(center)) {
+					outCenter = center;
+					return true;
+				}
+			}
+		}
+		for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+			stack.push_back(child.get());
+	}
+	return false;
+}
+
+static bool findBoolVariable(const Common::Array<Common::SharedPtr<Modifier> > &modifiers, const char *name, bool &outValue) {
+	for (const Common::SharedPtr<Modifier> &modifier : modifiers) {
+		if (modifier->isVariable() && modifier->getName().equalsIgnoreCase(name)) {
+			DynamicValue value;
+			static_cast<VariableModifier *>(modifier.get())->varGetValue(value);
+			if (value.getType() == DynamicValueTypes::kBoolean) {
+				outValue = value.getBool();
+				return true;
+			}
+		}
+		IModifierContainer *children = modifier->getChildContainer();
+		if (children && findBoolVariable(children->getModifiers(), name, outValue))
+			return true;
+	}
+	return false;
+}
+
+void AutoPlayer::playPort(Runtime *runtime, OSystem *system, uint32 now) {
+	struct Crate {
+		VisualElement *element;
+		Common::Point pos;
+		bool bomb;
+	};
+
+	Common::Array<Crate> crates;
+	Structural *deviation = nullptr;
+	VisualElement *switchElement = nullptr;
+
+	Common::Array<Structural *> stack;
+	runtime->getScenesInRenderOrder(stack);
+	while (!stack.empty()) {
+		Structural *structural = stack.back();
+		stack.pop_back();
+		const Common::String &name = structural->getName();
+		if (name == "deviation")
+			deviation = structural;
+		if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+			VisualElement *visual = static_cast<VisualElement *>(structural);
+			if (name == "switch")
+				switchElement = visual;
+			if (name.hasPrefix("caisse") && name.size() > 7 && visual->isVisible()) {
+				Crate crate;
+				crate.element = visual;
+				crate.pos = visual->getGlobalPosition();
+				crate.bomb = name.hasPrefix("caisse_bombe");
+				crates.push_back(crate);
+			}
+		}
+		for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+			stack.push_back(child.get());
+	}
+
+	if (!deviation || !switchElement || now < _portNextAction)
+		return;
+
+	// Crates leave the X-ray at x=198 on the top rail (y=105) and are switched up at x=364..375
+	bool bombComing = false;
+	for (const Crate &crate : crates) {
+		if (crate.bomb && crate.pos.y >= 95 && crate.pos.y <= 115 && crate.pos.x >= 150 && crate.pos.x <= 376)
+			bombComing = true;
+	}
+
+	bool devie = false;
+	findBoolVariable(deviation->getModifiers(), "devie", devie);
+	if (devie == bombComing) {
+		Common::Point pos = switchElement->getGlobalPosition();
+		const Common::Rect &rect = switchElement->getRelativeRect();
+		Common::Point center(pos.x + rect.width() / 2, pos.y + rect.height() / 2);
+		warning("AUTOPLAY: port: switch %s", bombComing ? "right (bomb)" : "up");
+		clickAt(runtime, system, center);
+		_portNextAction = now + 200;
+		return;
+	}
+
+	// Stamp the safe crates on the lower rails
+	for (const Crate &crate : crates) {
+		if (crate.bomb || crate.pos.y < 155 || crate.pos.y > 440)
+			continue;
+		bool stamped = false;
+		findBoolVariable(crate.element->getModifiers(), "tampon", stamped);
+		if (stamped)
+			continue;
+		uint32 last = _portLastStamp.getValOrDefault(crate.element->getName(), 0);
+		if (last && now < last + 1000)
+			continue;
+		const Common::Rect &rect = crate.element->getRelativeRect();
+		Common::Point center(crate.pos.x + rect.width() / 2, crate.pos.y + rect.height() / 2);
+		warning("AUTOPLAY: port: stamp '%s' at (%d,%d)", crate.element->getName().c_str(), (int)center.x, (int)center.y);
+		_portLastStamp[crate.element->getName()] = now;
+		clickAt(runtime, system, center);
+		_portNextAction = now + 200;
+		return;
+	}
+}
+
+bool AutoPlayer::findClickPoint(Runtime *runtime, const Common::String &name, Common::Point &outPoint) const {
+	Common::Point center;
+	if (!findOnScreenElement(runtime, name, center, Common::Rect(0, 0, 640, 480)))
+		return false;
+
+	int32 bestDist = -1;
+	for (int32 y = MAX<int32>(center.y - 80, 0); y < MIN<int32>(center.y + 80, 480); y += 2) {
+		for (int32 x = MAX<int32>(center.x - 80, 0); x < MIN<int32>(center.x + 80, 640); x += 2) {
+			int32 dist = (x - center.x) * (x - center.x) + (y - center.y) * (y - center.y);
+			if (bestDist >= 0 && dist >= bestDist)
+				continue;
+			Structural *target = runtime->debugFindMouseClickTarget(x, y);
+			if (target && target->getName().equalsIgnoreCase(name)) {
+				outPoint = Common::Point(x, y);
+				bestDist = dist;
+			}
+		}
+	}
+	if (bestDist < 0)
+		outPoint = center;
+	return true;
+}
+
+bool AutoPlayer::findNearestClickPoint(Runtime *runtime, const Common::String &name, const Common::Point &near, Common::Point &outPoint) const {
+	// The element with that name whose center is nearest to "near", then a point of it that gets the click
+	VisualElement *best = nullptr;
+	int32 bestDist = -1;
+	Common::Array<Structural *> stack;
+	runtime->getScenesInRenderOrder(stack);
+	while (!stack.empty()) {
+		Structural *structural = stack.back();
+		stack.pop_back();
+		if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+			VisualElement *visual = static_cast<VisualElement *>(structural);
+			if (visual->isVisible() && visual->getName().equalsIgnoreCase(name)) {
+				Common::Point pos = visual->getGlobalPosition();
+				Common::Point center(pos.x + visual->getRelativeRect().width() / 2, pos.y + visual->getRelativeRect().height() / 2);
+				int32 dist = (center.x - near.x) * (center.x - near.x) + (center.y - near.y) * (center.y - near.y);
+				if (bestDist < 0 || dist < bestDist) {
+					bestDist = dist;
+					best = visual;
+				}
+			}
+		}
+		for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+			stack.push_back(child.get());
+	}
+	if (!best)
+		return false;
+
+	Common::Point pos = best->getGlobalPosition();
+	const Common::Rect &rect = best->getRelativeRect();
+	Common::Point center(pos.x + rect.width() / 2, pos.y + rect.height() / 2);
+	outPoint = center;
+	if (_dragHasGrabOffset) {
+		outPoint = Common::Point(center.x + _dragGrabOffset.x, center.y + _dragGrabOffset.y);
+		return true;
+	}
+	int32 bestPointDist = -1;
+	for (int32 y = MAX<int32>(pos.y, 0); y < MIN<int32>(pos.y + rect.height(), 480); y += 2) {
+		for (int32 x = MAX<int32>(pos.x, 0); x < MIN<int32>(pos.x + rect.width(), 640); x += 2) {
+			int32 dist = (x - center.x) * (x - center.x) + (y - center.y) * (y - center.y);
+			if (bestPointDist >= 0 && dist >= bestPointDist)
+				continue;
+			if (runtime->debugFindMouseClickTarget(x, y) == best) {
+				outPoint = Common::Point(x, y);
+				bestPointDist = dist;
+			}
+		}
+	}
+	return true;
+}
+
+bool AutoPlayer::findElementCenter(Runtime *runtime, const Common::String &name, Common::Point &outCenter) const {
+	// Prefer the element that was grabbed, other elements can have the same name
+	Common::SharedPtr<RuntimeObject> grabbed = _dragElement.lock();
+	if (grabbed && grabbed->isStructural() && static_cast<Structural *>(grabbed.get())->isElement() && static_cast<Element *>(grabbed.get())->isVisual()) {
+		VisualElement *visual = static_cast<VisualElement *>(grabbed.get());
+		Common::Point pos = visual->getGlobalPosition();
+		const Common::Rect &rect = visual->getRelativeRect();
+		outCenter = Common::Point(pos.x + rect.width() / 2, pos.y + rect.height() / 2);
+		return true;
+	}
+	return findOnScreenElement(runtime, name, outCenter, Common::Rect(-2000, -2000, 2000, 2000));
+}
+
+void AutoPlayer::stepDrag(Runtime *runtime, OSystem *system, uint32 now) {
+	const uint kMoveSteps = 10;
+
+	if (_dragStep == 0) {
+		Common::Point start;
+		bool found;
+		if (_dragHasFrom)
+			found = findNearestClickPoint(runtime, _dragName, _dragFrom, start);
+		else
+			found = findClickPoint(runtime, _dragName, start);
+		if (!found) {
+			warning("AUTOPLAY: dragto: no visible '%s'", _dragName.c_str());
+			_dragName.clear();
+			return;
+		}
+		warning("AUTOPLAY: dragto: grabbing '%s' at (%d,%d)", _dragName.c_str(), (int)start.x, (int)start.y);
+		_dragStart = start;
+		Structural *grabbed = runtime->debugFindMouseClickTarget(start.x, start.y);
+		_dragElement = grabbed ? grabbed->getSelfReference() : Common::WeakPtr<RuntimeObject>();
+		_mouseX = start.x;
+		_mouseY = start.y;
+		system->warpMouse(start.x, start.y);
+		runtime->onMouseMove(start.x, start.y);
+		runtime->onMouseDown(start.x, start.y, Actions::kMouseButtonLeft);
+		_dragStep++;
+		_dragNext = now + 300;
+		return;
+	}
+
+	if (_dragStep <= kMoveSteps) {
+		int32 x = _dragStart.x + (_dragTarget.x - _dragStart.x) * (int32)_dragStep / (int32)kMoveSteps;
+		int32 y = _dragStart.y + (_dragTarget.y - _dragStart.y) * (int32)_dragStep / (int32)kMoveSteps;
+		_mouseX = x;
+		_mouseY = y;
+		system->warpMouse(x, y);
+		runtime->onMouseMove(x, y);
+		_dragStep++;
+		_dragNext = now + 120;
+		return;
+	}
+
+	if (_dragStep <= kMoveSteps + 3) {
+		// Move the mouse so that the element center lands on the target
+		Common::Point center;
+		// Small corrections only: an element that moves on its own (an animal walking) would send the mouse away
+		if (findElementCenter(runtime, _dragName, center) && ABS(_dragTarget.x - center.x) < 60 && ABS(_dragTarget.y - center.y) < 60) {
+			int32 x = CLIP<int32>(_mouseX + (_dragTarget.x - center.x), 0, 639);
+			int32 y = CLIP<int32>(_mouseY + (_dragTarget.y - center.y), 0, 479);
+			_mouseX = x;
+			_mouseY = y;
+			system->warpMouse(x, y);
+			runtime->onMouseMove(x, y);
+		}
+		_dragStep++;
+		_dragNext = now + 250;
+		return;
+	}
+
+	Common::Point center;
+	if (findElementCenter(runtime, _dragName, center))
+		warning("AUTOPLAY: dragto: releasing '%s' with its center at (%d,%d), mouse (%d,%d)", _dragName.c_str(), (int)center.x, (int)center.y, (int)_mouseX, (int)_mouseY);
+	runtime->onMouseUp(_mouseX, _mouseY, Actions::kMouseButtonLeft);
+	_dragName.clear();
+}
+
+void AutoPlayer::queueMouse(int type, int32 x, int32 y, uint32 delay) {
+	MouseOp op;
+	op.type = type;
+	op.pt = Common::Point(x, y);
+	op.delay = delay;
+	_mouseOps.push_back(op);
+}
+
+void AutoPlayer::queueSwipe(int32 x0, int32 y0, int32 x1, int32 y1, uint steps, uint32 delay) {
+	for (uint i = 1; i <= steps; i++)
+		queueMouse(0, x0 + (x1 - x0) * (int32)i / (int32)steps, y0 + (y1 - y0) * (int32)i / (int32)steps, delay);
+}
+
+// Plays queued mouse moves, presses and releases, one per call when due. Returns true while some are left.
+bool AutoPlayer::runMouseQueue(Runtime *runtime, OSystem *system, uint32 now) {
+	if (_mouseOpIndex >= _mouseOps.size()) {
+		_mouseOps.clear();
+		_mouseOpIndex = 0;
+		return false;
+	}
+	if (now < _mouseOpNext)
+		return true;
+	const MouseOp &op = _mouseOps[_mouseOpIndex++];
+	if (op.type != 3) {
+		_mouseX = op.pt.x;
+		_mouseY = op.pt.y;
+		system->warpMouse(op.pt.x, op.pt.y);
+		runtime->onMouseMove(op.pt.x, op.pt.y);
+		if (op.type == 1)
+			runtime->onMouseDown(op.pt.x, op.pt.y, Actions::kMouseButtonLeft);
+		else if (op.type == 2)
+			runtime->onMouseUp(op.pt.x, op.pt.y, Actions::kMouseButtonLeft);
+	}
+	_mouseOpNext = now + op.delay;
+	return true;
+}
+
+static int sydneyCel(VisualElement *element) {
+	MToonElement *mtoon = dynamic_cast<MToonElement *>(element);
+	return mtoon ? (int)mtoon->debugGetCel() : -1;
+}
+
+void AutoPlayer::playSydney(Runtime *runtime, OSystem *system, uint32 now) {
+	VisualElement *neck = findVisualByName(runtime, "neck");
+	VisualElement *back = findVisualByName(runtime, "back");
+	VisualElement *gulper = findVisualByName(runtime, "gous_attack");
+	if (!neck || !back) {
+		warning("AUTOPLAY: sydney: the submarine is gone");
+		_sydneyUntil = 0;
+		return;
+	}
+	// The sea background scrolls up 1 px per depth unit from y=170 (red.prof, 0 to 430)
+	const int depth = 170 - back->getGlobalPosition().y;
+	const int gulperCel = gulper ? sydneyCel(gulper) : -1;
+	if (now >= _sydneyLog) {
+		debug(1, "SYDNEY depth=%d neck=%d gulper=%d photo=%d", depth, sydneyCel(neck), gulperCel, _sydneyPhoto ? 1 : 0);
+		_sydneyLog = now + 2000;
+	}
+
+	// The gulper attacks: take its photo while its cel is within 3..41 (if_good_cels)
+	if (!_sydneyPhoto && gulperCel > 1 && gulperCel < 30) {
+		warning("AUTOPLAY: sydney: the gulper attacks (cel %d), taking its photo", gulperCel);
+		Common::Point c = gulper->getGlobalPosition();
+		c.x += gulper->getRelativeRect().width() / 2;
+		c.y += gulper->getRelativeRect().height() / 2;
+		queueMouse(1, 232, 459, 50);
+		queueMouse(2, 232, 459, 600);
+		queueSwipe(232, 459, c.x, c.y, 4, 60);
+		queueMouse(0, c.x + 2, c.y, 250);
+		queueMouse(1, c.x + 2, c.y, 50);
+		queueMouse(2, c.x + 2, c.y, 3000);
+		_sydneyPhoto = true;
+		_sydneyLeverNext = 0;
+		return;
+	}
+
+	// Plug a crack: pressing the board box shows a board that follows the mouse; releasing it near a crack's
+	// center hides the crack (tablet snicked). The box is at (82,389)-(196,424), partly under bigcache.pct below y=406
+	for (int i = 1; i <= 10; i++) {
+		VisualElement *crack = findVisualByName(runtime, Common::String::format("water_crack%d", i).c_str());
+		if (!crack)
+			continue;
+		Common::Point c = crack->getGlobalPosition();
+		c.x += crack->getRelativeRect().width() / 2;
+		c.y += crack->getRelativeRect().height() / 2;
+		warning("AUTOPLAY: sydney: plugging water_crack%d at (%d,%d), depth %d", i, (int)c.x, (int)c.y, depth);
+		queueMouse(0, 139, 397, 60);
+		queueMouse(1, 139, 397, 120);
+		queueSwipe(139, 397, c.x, c.y, 6, 50);
+		queueMouse(0, c.x, c.y, 150);
+		queueMouse(2, c.x, c.y, 400);
+		return;
+	}
+
+	if (_sydneyPhoto && depth <= 0) {
+		warning("AUTOPLAY: sydney: back at the surface with the photo");
+		_sydneyUntil = 0;
+		return;
+	}
+
+	// The lever: dragging right then left lowers its cel (1 dives, 2 stops, 3 rises); the "rot" script only
+	// compares with the last position where it changed, so sweep the other way first
+	const int want = _sydneyPhoto ? 3 : 1;
+	if (sydneyCel(neck) != want && now >= _sydneyLeverNext) {
+		warning("AUTOPLAY: sydney: lever cel %d -> %d at depth %d", sydneyCel(neck), want, depth);
+		const int32 x = 515, y = 370;
+		queueMouse(0, x, y, 60);
+		queueMouse(1, x, y, 100);
+		if (want == 1) {
+			queueSwipe(x, y, x + 24, y, 3, 60);
+			queueSwipe(x + 24, y, x - 24, y, 6, 60);
+			queueMouse(2, x - 24, y, 500);
+		} else {
+			queueSwipe(x, y, x - 16, y, 2, 60);
+			queueSwipe(x - 16, y, x + 32, y, 6, 60);
+			queueMouse(2, x + 32, y, 500);
+		}
+		_sydneyLeverNext = now + 3000;
+	}
+}
+
+static bool findVariableValue(const Common::Array<Common::SharedPtr<Modifier> > &modifiers, const char *name, DynamicValue &outValue) {
+	for (const Common::SharedPtr<Modifier> &modifier : modifiers) {
+		if (modifier->isVariable() && modifier->getName().equalsIgnoreCase(name)) {
+			static_cast<VariableModifier *>(modifier.get())->varGetValue(outValue);
+			return true;
+		}
+		IModifierContainer *children = modifier->getChildContainer();
+		if (children && findVariableValue(children->getModifiers(), name, outValue))
+			return true;
+	}
+	return false;
+}
+
+// The sacred spot (04-C-parchemin): each parchment piece is placed when dropped with its position near its own
+// good_pos (test_pos). Drag them one at a time, grabbing each where it gets the click.
+void AutoPlayer::playSacred(Runtime *runtime, OSystem *system, uint32 now) {
+	_sacredNext = now + 2500;
+
+	Common::Array<Structural *> stack;
+	runtime->getScenesInRenderOrder(stack);
+	while (!stack.empty()) {
+		Structural *structural = stack.back();
+		stack.pop_back();
+		for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+			stack.push_back(child.get());
+		if (!structural->isElement() || !static_cast<Element *>(structural)->isVisual() || structural->getName() != "parchemin")
+			continue;
+		VisualElement *parch = static_cast<VisualElement *>(structural);
+		DynamicValue goodPos, prenom;
+		if (!parch->isVisible() || !findVariableValue(parch->getModifiers(), "good_pos", goodPos) || goodPos.getType() != DynamicValueTypes::kPoint)
+			continue;
+		if (findVariableValue(parch->getModifiers(), "prenom", prenom) && prenom.getType() == DynamicValueTypes::kString && prenom.getString() == "placed")
+			continue;
+
+		const Common::Point pos = parch->getGlobalPosition();
+		const Common::Rect &rect = parch->getRelativeRect();
+		Common::Point grab(-1, -1);
+		for (int32 y = pos.y + 4; y < pos.y + rect.height() - 4 && grab.x < 0; y += 4) {
+			for (int32 x = pos.x + 4; x < pos.x + rect.width() - 4 && grab.x < 0; x += 4) {
+				if (x >= 0 && y >= 0 && x < 640 && y < 480 && runtime->debugFindMouseClickTarget(x, y) == parch)
+					grab = Common::Point(x, y);
+			}
+		}
+		if (grab.x < 0)
+			continue;
+		// good_pos is relative to the scene, where a piece dropped on the page goes
+		const Common::Point target = goodPos.getPoint();
+		const Common::Point drop(grab.x + target.x - pos.x, grab.y + target.y - pos.y);
+		warning("AUTOPLAY: sacred: parchment at (%d,%d) to (%d,%d), grabbed at (%d,%d)", (int)pos.x, (int)pos.y, (int)target.x, (int)target.y, (int)grab.x, (int)grab.y);
+		queueMouse(1, grab.x, grab.y, 100);
+		queueSwipe(grab.x, grab.y, drop.x, drop.y, 10, 60);
+		queueMouse(0, drop.x, drop.y, 300);
+		queueMouse(2, drop.x, drop.y, 2500);
+		return;
+	}
+	warning("AUTOPLAY: sacred: no parchment left to place");
+	_sacredUntil = 0;
+}
+
+// The crab follows the mouse while dragged. Released more than 15 px from where it was pressed, it turns to the
+// direction (center - mouse) - 60 degrees (screen y up) and walks about 105 px that way; pressed and released in
+// place, it pinches: crabe_pince cuts a bug_rope it collides with if its angle and the direction to the rope's
+// center (screen y down) are within 90 degrees.
+void AutoPlayer::playTahiti(Runtime *runtime, OSystem *system, uint32 now) {
+	_tahitiNext = now + 500;
+
+	VisualElement *crab = findVisualByName(runtime, "crabe");
+	if (!crab) {
+		warning("AUTOPLAY: tahiti: no crab");
+		_tahitiUntil = 0;
+		return;
+	}
+	// Ropes still to cut: the frayed parts are children of rope_up and rope_down
+	VisualElement *ropes[2] = {findVisualByName(runtime, "rope_up"), findVisualByName(runtime, "rope_down")};
+	VisualElement *rope = nullptr;
+	int ropeIndex = 0;
+	for (int i = 0; i < 2 && !rope; i++) {
+		if (ropes[i]) {
+			for (const Common::SharedPtr<Structural> &child : ropes[i]->getChildren()) {
+				if (child->getName() == "bug_rope" && child->isElement() && static_cast<VisualElement *>(child.get())->isVisible()) {
+					rope = static_cast<VisualElement *>(child.get());
+					ropeIndex = i;
+				}
+			}
+		}
+	}
+	if (!rope) {
+		warning("AUTOPLAY: tahiti: both ropes are cut");
+		_tahitiUntil = 0;
+		return;
+	}
+
+	const Common::Point crabPos = crab->getGlobalPosition();
+	const Common::Rect crabRect(crabPos.x, crabPos.y, crabPos.x + crab->getRelativeRect().width(), crabPos.y + crab->getRelativeRect().height());
+	const Common::Point crabCenter((crabRect.left + crabRect.right) / 2, (crabRect.top + crabRect.bottom) / 2);
+	const Common::Point ropePos = rope->getGlobalPosition();
+	const Common::Rect ropeRect(ropePos.x, ropePos.y, ropePos.x + rope->getRelativeRect().width(), ropePos.y + rope->getRelativeRect().height());
+	const Common::Point ropeCenter((ropeRect.left + ropeRect.right) / 2, (ropeRect.top + ropeRect.bottom) / 2);
+
+	// Still walking?
+	static Common::Point lastPos;
+	if (crabPos != lastPos) {
+		lastPos = crabPos;
+		return;
+	}
+
+	if (crabRect.width() < 60) {
+		// Still the small margin icon: drop it on the page first
+		warning("AUTOPLAY: tahiti: taking the crab out of the margin");
+		queueMouse(1, crabCenter.x, crabCenter.y, 100);
+		queueSwipe(crabCenter.x, crabCenter.y, 320, 250, 8, 60);
+		queueMouse(2, 320, 250, 2500);
+		return;
+	}
+
+	// The angle the crab faces (its animation's rotator)
+	double angle = 0.0;
+	{
+		DynamicValue value;
+		Common::SharedPtr<MessageProperties> props(new MessageProperties(Event(), DynamicValue(), Common::WeakPtr<RuntimeObject>()));
+		MiniscriptThread thread(runtime, props, nullptr, nullptr, nullptr);
+		for (const Common::SharedPtr<Structural> &child : crab->getChildren()) {
+			if (child->getName() == "animation") {
+				for (const Common::SharedPtr<Modifier> &mod : child->getModifiers()) {
+					if (mod->getName() == "tourner" && mod->readAttribute(&thread, value, "angle"))
+						angle = (value.getType() == DynamicValueTypes::kFloat) ? value.getFloat() : (value.getType() == DynamicValueTypes::kInteger ? value.getInt() : 0);
+				}
+			}
+		}
+	}
+	const double ropeAngle = atan2((double)(ropeCenter.y - crabCenter.y), (double)(ropeCenter.x - crabCenter.x)) * 180.0 / M_PI;
+	const double diff = fabs(angle - ropeAngle);
+	const bool colliding = crabRect.intersects(ropeRect);
+	warning("AUTOPLAY: tahiti: crab at (%d,%d) angle %.1f, rope %d at (%d,%d) direction %.1f, colliding %d", (int)crabCenter.x, (int)crabCenter.y, angle, ropeIndex, (int)ropeCenter.x, (int)ropeCenter.y, ropeAngle, colliding ? 1 : 0);
+	if (colliding && (diff <= 80 || diff >= 280) && _tahitiTries > 0) {
+		warning("AUTOPLAY: tahiti: pinching rope %d", ropeIndex);
+		queueMouse(1, crabCenter.x, crabCenter.y, 50);
+		queueMouse(2, crabCenter.x, crabCenter.y, 2500);
+		_tahitiTries = 0;
+		return;
+	}
+
+	// Walk: the upper rope is cut walking down-right (-45), the lower one walking right (0); end with the crab's
+	// center below-left of the rope center (upper) or above-left of it (lower), overlapping it
+	const double walkAngle = (ropeIndex == 0) ? -45.0 : 0.0;
+	const Common::Point end = (ropeIndex == 0) ? Common::Point(ropeCenter.x - 13, ropeCenter.y + 41) : Common::Point(ropeCenter.x - 46, ropeCenter.y - 24);
+	const double kWalk = 105.0;
+	const double rad = walkAngle * M_PI / 180.0;
+	const Common::Point start(end.x - (int)(kWalk * cos(rad)), end.y + (int)(kWalk * sin(rad)));
+	const double grabRad = (walkAngle + 60.0) * M_PI / 180.0;
+	const Common::Point grab(-(int)(20 * cos(grabRad)), (int)(20 * sin(grabRad)));
+	warning("AUTOPLAY: tahiti: dropping the crab at (%d,%d) to walk %.0f degrees to (%d,%d)", (int)start.x, (int)start.y, walkAngle, (int)end.x, (int)end.y);
+	queueMouse(1, crabCenter.x + grab.x, crabCenter.y + grab.y, 100);
+	queueSwipe(crabCenter.x + grab.x, crabCenter.y + grab.y, start.x + grab.x, start.y + grab.y, 8, 60);
+	queueMouse(0, start.x + grab.x, start.y + grab.y, 300);
+	queueMouse(2, start.x + grab.x, start.y + grab.y, 100);
+	queueMouse(0, 600, 470, 2500);
+	_tahitiTries++;
+}
+
+void AutoPlayer::playNile(Runtime *runtime, OSystem *system, uint32 now) {
+	VisualElement *boat = nullptr;
+	VisualElement *river = nullptr;
+	Common::Array<Common::Rect> crocodiles;
+	Common::Array<Common::Rect> islands;
+	Common::Array<Common::String> islandNames;
+
+	Common::Array<Structural *> stack;
+	runtime->getScenesInRenderOrder(stack);
+	while (!stack.empty()) {
+		Structural *structural = stack.back();
+		stack.pop_back();
+		if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+			VisualElement *visual = static_cast<VisualElement *>(structural);
+			const Common::String &name = visual->getName();
+			Common::Point pos = visual->getGlobalPosition();
+			Common::Rect rect(pos.x, pos.y, pos.x + visual->getRelativeRect().width(), pos.y + visual->getRelativeRect().height());
+			if (name == "boat")
+				boat = visual;
+			else if (name == "river")
+				river = visual;
+			else if (visual->isVisible() && name.hasPrefix("croco"))
+				crocodiles.push_back(rect);
+			else if (visual->isVisible() && ((name.hasPrefix("isle") && !name.hasPrefix("isle_border") && name != "isle05") || name.hasPrefix("sensor") || name.hasPrefix("box"))) {
+				islands.push_back(rect);
+				islandNames.push_back(name);
+			}
+		}
+		for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+			stack.push_back(child.get());
+	}
+	if (!boat || !river)
+		return;
+
+	Common::Point boatPos = boat->getGlobalPosition();
+	Common::Rect boatRect(boatPos.x, boatPos.y, boatPos.x + boat->getRelativeRect().width(), boatPos.y + boat->getRelativeRect().height());
+	Common::Point riverPos = river->getGlobalPosition();
+	const Common::Rect &riverRel = river->getRelativeRect();
+	const int32 riverLeft = riverPos.x + 20;
+	const int32 riverRight = riverPos.x + riverRel.width() - 15;
+	const int32 riverTop = riverPos.y + 25;
+	const int32 boatCenterX = (boatRect.left + boatRect.right) / 2;
+
+	// Simulate each of the 9 moves for a moment: crocodiles come up from below steering toward the boat (at most
+	// 45 degrees from vertical), islands scroll up. Keep the move with the most clearance that hits nothing.
+	const double kBoatSpeed = 85.0, kCrocSpeed = 76.0, kIslandSpeed = 40.0;	// Pixels per second, measured
+	const double kDt = 0.1;
+	const int kSteps = 16;
+	const double riverBottom = riverPos.y + riverRel.height() - 25;
+	int dirX = 0;
+	int dirY = 0;
+	double bestScore = -1e18;
+	for (int dy = -1; dy <= 1; dy++) {
+		for (int dx = -1; dx <= 1; dx++) {
+			double norm = (dx != 0 && dy != 0) ? 0.7071 : 1.0;
+			double bx = boatRect.left, by = boatRect.top;
+			const double bw = boatRect.width(), bh = boatRect.height();
+			Common::Array<double> cxs, cys;
+			for (const Common::Rect &c : crocodiles) {
+				cxs.push_back(c.left);
+				cys.push_back(c.top);
+			}
+			double minDist = 1e9;
+			double penalty = 0;
+			for (int step = 1; step <= kSteps; step++) {
+				bx += dx * norm * kBoatSpeed * kDt;
+				by += dy * norm * kBoatSpeed * kDt;
+				if (bx < riverLeft || bx + bw > riverRight || by < riverTop || by + bh > riverBottom) {
+					penalty += 2000.0 / step;
+					bx = CLIP<double>(bx, riverLeft, riverRight - bw);
+					by = CLIP<double>(by, riverTop, riverBottom - bh);
+				}
+				const double rise = kIslandSpeed * kDt * step;
+				for (const Common::Rect &o : islands) {
+					if (bx + bw > o.left - 6 && bx < o.right + 6 && by + bh > o.top - rise - 6 && by < o.bottom - rise + 6)
+						penalty += 100000.0 / step;
+				}
+				for (uint i = 0; i < crocodiles.size(); i++) {
+					const double cw = crocodiles[i].width(), ch = crocodiles[i].height();
+					if (cys[i] + ch * 0.5 > by + bh * 0.5) {
+						// Below the boat: steer toward it, upward within 45 degrees of vertical
+						double vx = (bx + bw * 0.5) - (cxs[i] + cw * 0.5);
+						double vy = (by + bh * 0.5) - (cys[i] + ch * 0.5);	// Negative: the boat is above
+						double len = sqrt(vx * vx + vy * vy);
+						if (len > 0.001) {
+							vx /= len;
+							vy /= len;
+						}
+						if (vy > -0.7071) {
+							vy = -0.7071;
+							vx = vx < 0 ? -0.7071 : 0.7071;
+						}
+						cxs[i] += vx * kCrocSpeed * kDt;
+						cys[i] += vy * kCrocSpeed * kDt;
+					} else
+						cys[i] -= kCrocSpeed * kDt;
+					// Distance between the rectangles
+					double gapX = MAX<double>(0, MAX<double>(cxs[i] - (bx + bw), bx - (cxs[i] + cw)));
+					double gapY = MAX<double>(0, MAX<double>(cys[i] - (by + bh), by - (cys[i] + ch)));
+					double dist = sqrt(gapX * gapX + gapY * gapY);
+					if (dist < minDist)
+						minDist = dist;
+					if (dist < 4)
+						penalty += 50000.0 / step;
+				}
+			}
+			double score = MIN<double>(minDist, 120.0) * 10.0 - penalty;
+			// Prefer staying in the middle height with room to dodge
+			score -= ABS(by - (riverTop + 110)) * 0.5;
+			score -= ABS(bx + bw * 0.5 - (riverLeft + riverRight) * 0.5) * 0.2;
+			if (score > bestScore) {
+				bestScore = score;
+				dirX = dx;
+				dirY = dy;
+			}
+		}
+	}
+
+	_nileLastDir = dirX;
+
+	Common::String crocs;
+	for (const Common::Rect &c : crocodiles)
+		crocs += Common::String::format(" (%d,%d)", (int)c.left, (int)c.top);
+	Common::String isles;
+	for (uint i = 0; i < islands.size(); i++)
+		isles += Common::String::format(" %s(%d,%d %dx%d)", islandNames[i].c_str(), (int)islands[i].left, (int)islands[i].top, (int)islands[i].width(), (int)islands[i].height());
+	debug(1, "NILE boat (%d,%d %dx%d) dir %d,%d crocs%s isles%s", (int)boatRect.left, (int)boatRect.top, (int)boatRect.width(), (int)boatRect.height(), dirX, dirY, crocs.c_str(), isles.c_str());
+
+	int32 mouseX = boatCenterX + dirX * 40;
+	int32 mouseY = (boatRect.top + boatRect.bottom) / 2 + dirY * 40;
+	if (dirX == 0 && dirY == 0)
+		mouseY = (boatRect.top + boatRect.bottom) / 2;
+	mouseX = CLIP<int32>(mouseX, riverPos.x + 12, riverPos.x + riverRel.width() - 7);
+	mouseY = CLIP<int32>(mouseY, riverPos.y + 22, riverPos.y + riverRel.height() - 22);
+	_mouseX = mouseX;
+	_mouseY = mouseY;
+	system->warpMouse(mouseX, mouseY);
+	runtime->onMouseMove(mouseX, mouseY);
+}
+
+void AutoPlayer::playBorneo(Runtime *runtime, OSystem *system, uint32 now) {
+	VisualElement *dragonfly = nullptr;
+	VisualElement *lilyPad = nullptr;
+	Common::Array<Common::Rect> seeds;
+	Common::Array<Common::Rect> openPlants;
+	bool carrying = false;
+
+	Common::Array<Structural *> stack;
+	runtime->getScenesInRenderOrder(stack);
+	while (!stack.empty()) {
+		Structural *structural = stack.back();
+		stack.pop_back();
+		if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+			VisualElement *visual = static_cast<VisualElement *>(structural);
+			const Common::String &name = visual->getName();
+			Common::Point pos = visual->getGlobalPosition();
+			Common::Rect rect(pos.x, pos.y, pos.x + visual->getRelativeRect().width(), pos.y + visual->getRelativeRect().height());
+			Structural *parent = visual->getParent();
+			if (name == "dragonfly" && visual->isVisible())
+				dragonfly = visual;
+			else if (name == "animation" && parent && parent->getName() == "nenuphar")
+				lilyPad = visual;
+			else if (visual->isVisible() && ((name == "pollen" && parent && parent->getName() != "dragonfly") || name.equalsIgnoreCase("pollenFixe")))
+				seeds.push_back(rect);
+			else if (name == "sensor" && parent && parent->getName().hasPrefix("carnivora") && parent->isElement() && static_cast<Element *>(parent)->isVisual() && static_cast<VisualElement *>(parent)->isVisible()) {
+				// The plant catches with its sensor, while it is open
+				bool open = true;
+				findBoolVariable(parent->getModifiers(), "open", open);
+				if (open)
+					openPlants.push_back(rect);
+			}
+		}
+		for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+			stack.push_back(child.get());
+	}
+	if (!dragonfly || !lilyPad)
+		return;
+
+	findBoolVariable(dragonfly->getModifiers(), "carrypollen", carrying);
+
+	Common::Point dPos = dragonfly->getGlobalPosition();
+	Common::Rect dRect(dPos.x, dPos.y, dPos.x + dragonfly->getRelativeRect().width(), dPos.y + dragonfly->getRelativeRect().height());
+	Common::Point dCenter((dRect.left + dRect.right) / 2, (dRect.top + dRect.bottom) / 2);
+
+	const bool lost = _borneoDragging && (ABS(dCenter.x - _borneoMouse.x) > 40 || ABS(dCenter.y - _borneoMouse.y) > 40);
+	if (!_borneoDragging || lost) {
+		// (Re)grab the dragonfly when it isn't under the mouse any more (eaten, or it got away)
+		if (_borneoDragging)
+			runtime->onMouseUp(_borneoMouse.x, _borneoMouse.y, Actions::kMouseButtonLeft);
+		Common::Point grab;
+		if (!findNearestClickPoint(runtime, "dragonfly", dCenter, grab))
+			return;
+		_borneoMouse = grab;
+		system->warpMouse(grab.x, grab.y);
+		runtime->onMouseMove(grab.x, grab.y);
+		runtime->onMouseDown(grab.x, grab.y, Actions::kMouseButtonLeft);
+		_borneoDragging = true;
+		_borneoGrabTime = now;
+		return;
+	}
+
+	Common::Point lily = lilyPad->getGlobalPosition();
+	const Common::Rect &lilyRel = lilyPad->getRelativeRect();
+	Common::Point lilyCenter(lily.x + lilyRel.width() / 2, lily.y + lilyRel.height() / 2);
+	const Common::Point gate(lily.x - 45, lilyCenter.y);	// Left of the lily pad, where no plant is
+
+	Common::Point target(lilyCenter.x, lilyCenter.y);
+	if (!carrying) {
+		if (seeds.empty()) {
+			target = gate;
+		} else {
+			int32 bestDist = -1;
+			for (const Common::Rect &r : seeds) {
+				Common::Point c((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+				int32 dist = (c.x - dCenter.x) * (c.x - dCenter.x) + (c.y - dCenter.y) * (c.y - dCenter.y);
+				if (bestDist < 0 || dist < bestDist) {
+					bestDist = dist;
+					target = c;
+				}
+			}
+		}
+	}
+
+	// Potential field: pulled toward the target, pushed away from the open sensors nearby
+	double vx = target.x - dCenter.x, vy = target.y - dCenter.y;
+	double vlen = sqrt(vx * vx + vy * vy);
+	if (vlen > 0.001) {
+		vx /= vlen;
+		vy /= vlen;
+	}
+	if (vlen < 3) {
+		vx = vy = 0;
+	}
+	for (const Common::Rect &p : openPlants) {
+		// Distance from the dragonfly rect to the sensor rect
+		double gx = MAX<int32>(0, MAX<int32>(p.left - dRect.right, dRect.left - p.right));
+		double gy = MAX<int32>(0, MAX<int32>(p.top - dRect.bottom, dRect.top - p.bottom));
+		double gap = sqrt(gx * gx + gy * gy);
+		if (gap > 60)
+			continue;
+		double ax = dCenter.x - (p.left + p.right) / 2.0, ay = dCenter.y - (p.top + p.bottom) / 2.0;
+		double alen = MAX<double>(1.0, sqrt(ax * ax + ay * ay));
+		double push = (60.0 - gap) / 60.0 * 2.5;
+		vx += ax / alen * push;
+		vy += ay / alen * push;
+	}
+	double flen = sqrt(vx * vx + vy * vy);
+	const int32 step = 7;
+	int32 dx = 0, dy = 0;
+	if (flen > 0.05) {
+		dx = (int32)floor(vx / flen * step + 0.5);
+		dy = (int32)floor(vy / flen * step + 0.5);
+	}
+	// Stay on the page
+	if (dRect.left + dx < 80 || dRect.right + dx > 560)
+		dx = 0;
+	if (dRect.top + dy < 55 || dRect.bottom + dy > 425)
+		dy = 0;
+
+	if (now / 1000 != _borneoGrabTime / 1000 && (now % 1000) < 45) {
+		Common::String plants;
+		for (const Common::Rect &p : openPlants)
+			plants += Common::String::format(" (%d,%d %dx%d)", (int)p.left, (int)p.top, (int)p.width(), (int)p.height());
+		debug(1, "BORNEO fly (%d,%d) carrying %d target (%d,%d) seeds %u open sensors%s", (int)dCenter.x, (int)dCenter.y, carrying ? 1 : 0, (int)target.x, (int)target.y, (uint)seeds.size(), plants.c_str());
+	}
+
+	_borneoMouse.x += dx;
+	_borneoMouse.y += dy;
+	(void)lost;
+	_mouseX = _borneoMouse.x;
+	_mouseY = _borneoMouse.y;
+	system->warpMouse(_borneoMouse.x, _borneoMouse.y);
+	runtime->onMouseMove(_borneoMouse.x, _borneoMouse.y);
+}
+
+bool AutoPlayer::planManille(Runtime *runtime) {
+	ImageElement *map = dynamic_cast<ImageElement *>(findVisualByName(runtime, "map"));
+	VisualElement *boat = findVisualByName(runtime, "boat");
+	VisualElement *refuel1 = findVisualByName(runtime, "ravitaillement1");
+	VisualElement *refuel2 = findVisualByName(runtime, "ravitaillement2");
+	VisualElement *island = findVisualByName(runtime, "ile_croco");
+	Common::SharedPtr<Graphics::ManagedSurface> surf = map ? map->debugGetImage() : nullptr;
+	if (!surf || !boat || !refuel1 || !refuel2 || !island) {
+		warning("AUTOPLAY: manille: missing map elements");
+		return false;
+	}
+
+	const byte *palette = nullptr;
+	byte paletteBuf[256 * 3];
+	if (surf->format.bytesPerPixel == 1) {
+		const Palette *pal = map->getPalette().get();
+		if (!pal)
+			pal = &runtime->getGlobalPalette();
+		memcpy(paletteBuf, pal->getPalette(), sizeof(paletteBuf));
+		palette = paletteBuf;
+	}
+	auto isWater = [&](int x, int y) -> bool {
+		if (x < 0 || y < 0 || x >= surf->w || y >= surf->h)
+			return false;
+		uint32 c = surf->getPixel(x, y);
+		uint8 r, g, b;
+		if (palette) {
+			r = palette[c * 3];
+			g = palette[c * 3 + 1];
+			b = palette[c * 3 + 2];
+		} else {
+			uint8 a;
+			surf->format.colorToARGB(c, a, r, g, b);
+		}
+		return b > r + 25 && b > g + 10;
+	};
+
+	// Grid of 8 px cells; a cell is navigable if the boat (15 px) there touches none of the obstacle rectangles
+	// that sink it: the island masks "ile" (the picture is only decoration), barrels, mines and the pirate
+	const int kCell = 8;
+	const int gw = surf->w / kCell, gh = surf->h / kCell;
+	const Common::Point mapOrigin = map->getGlobalPosition();
+	Common::Array<Common::Rect> obstacles;
+	{
+		Common::Array<Structural *> stack;
+		stack.push_back(map);
+		while (!stack.empty()) {
+			Structural *structural = stack.back();
+			stack.pop_back();
+			if (structural != map && structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+				VisualElement *v = static_cast<VisualElement *>(structural);
+				const Common::String &n = v->getName();
+				// What the game collides with: an mToon's current frame rect, which can be offset from the element's
+				Common::Rect collision = v->getRelativeCollisionRect();
+				{
+					Common::Point gp = v->getGlobalPosition();
+					collision.translate(gp.x - v->getRelativeRect().left - mapOrigin.x, gp.y - v->getRelativeRect().top - mapOrigin.y);
+				}
+				if (n == "ile" || n == "sable" || n == "hautfond" || n == "courant_opp" || n.hasPrefix("barrel")) {
+					obstacles.push_back(collision);
+				} else if (n == "boum") {
+					// Mines: keep well away
+					Common::Rect r = collision;
+					debug(1, "MANILLEMINE %d %d %d %d (element %d %d %d %d)", (int)r.left, (int)r.top, (int)r.right, (int)r.bottom,
+						(int)(v->getGlobalPosition().x - mapOrigin.x), (int)(v->getGlobalPosition().y - mapOrigin.y), (int)v->getRelativeRect().width(), (int)v->getRelativeRect().height());
+					r.grow(15);
+					obstacles.push_back(r);
+				} else if (n == "pirat") {
+					// The pirate chases a boat within 155 x 120 px of it and shoots within 80 px: keep out of that
+					// zone around its home position
+					Common::Point gp = v->getGlobalPosition();
+					DynamicValue home;
+					Common::SharedPtr<MessageProperties> props(new MessageProperties(Event(), DynamicValue(), Common::WeakPtr<RuntimeObject>()));
+					MiniscriptThread thread(runtime, props, nullptr, nullptr, nullptr);
+					Common::Point homeLocal(gp.x - mapOrigin.x, gp.y - mapOrigin.y);
+					if (v->readAttribute(&thread, home, "initpos") && home.getType() == DynamicValueTypes::kObject) {
+						DynamicValue hv;
+						Common::SharedPtr<RuntimeObject> hobj = home.getObject().object.lock();
+						if (hobj && hobj->isModifier() && static_cast<Modifier *>(hobj.get())->isVariable()) {
+							static_cast<VariableModifier *>(hobj.get())->varGetValue(hv);
+							if (hv.getType() == DynamicValueTypes::kPoint)
+								homeLocal = hv.getPoint();	// Relative to the map, like the pirate's position
+						}
+					}
+					warning("AUTOPLAY: manille: pirate home at (%d,%d)", (int)homeLocal.x, (int)homeLocal.y);
+					obstacles.push_back(Common::Rect(homeLocal.x - 150, homeLocal.y - 112, homeLocal.x + 150, homeLocal.y + 112));
+				}
+			}
+			for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+				stack.push_back(child.get());
+		}
+	}
+	warning("AUTOPLAY: manille: %u obstacles", obstacles.size());
+	for (const Common::Rect &o : obstacles)
+		debug(1, "MANILLEOBS %d %d %d %d", (int)o.left, (int)o.top, (int)o.right, (int)o.bottom);
+	// Clearance of each cell: distance from its center to the nearest obstacle, up to 40 px. A cell is free with
+	// at least 11 px (the boat is 15 px wide); the path prefers cells with more clearance.
+	Common::Array<bool> &free = _manilleFree;
+	_manilleGridW = gw;
+	_manilleGridH = gh;
+	free.clear();
+	free.resize(gw * gh);
+	Common::Array<int> clearance;
+	clearance.resize(gw * gh);
+	for (int cy = 0; cy < gh; cy++) {
+		for (int cx = 0; cx < gw; cx++) {
+			int px = cx * kCell + kCell / 2, py = cy * kCell + kCell / 2;
+			int best = 40;
+			for (const Common::Rect &o : obstacles) {
+				int gx = MAX<int>(0, MAX<int>(o.left - px, px - o.right));
+				int gy = MAX<int>(0, MAX<int>(o.top - py, py - o.bottom));
+				int d = MAX<int>(gx, gy);
+				if (d < best)
+					best = d;
+			}
+			clearance[cy * gw + cx] = best;
+			free[cy * gw + cx] = best >= 11;
+		}
+	}
+	(void)isWater;
+
+	const Common::Point mapPos = map->getGlobalPosition();
+	auto local = [&](VisualElement *e) {
+		Common::Point p = e->getGlobalPosition();
+		return Common::Point(p.x - mapPos.x + e->getRelativeRect().width() / 2, p.y - mapPos.y + e->getRelativeRect().height() / 2);
+	};
+	Common::Point goals[4] = {local(boat), local(refuel1), local(refuel2), local(island)};
+	{
+		Common::Rect bc = boat->getRelativeCollisionRect(), br = boat->getRelativeRect();
+		debug(1, "MANILLEBOAT rect %d %d %d %d collision %d %d %d %d", (int)br.left, (int)br.top, (int)br.right, (int)br.bottom, (int)bc.left, (int)bc.top, (int)bc.right, (int)bc.bottom);
+	}
+	_manilleRefuelPoint[0] = goals[1];
+	_manilleRefuelPoint[1] = goals[2];
+	// Legs already done (refuel points reached) start from the boat
+	int firstLeg = _manilleRefueled[1] ? 2 : (_manilleRefueled[0] ? 1 : 0);
+	goals[firstLeg] = local(boat);
+
+	_manillePath.clear();
+	for (int leg = 0; leg < 3; leg++)
+		_manilleLegEnds[leg] = 0;
+	for (int leg = firstLeg; leg < 3; leg++) {
+		Common::Point from = goals[leg], to = goals[leg + 1];
+		int sx = from.x / kCell, sy = from.y / kCell, tx = to.x / kCell, ty = to.y / kCell;
+		Common::Array<int> prev;
+		Common::Array<int> dist;
+		prev.resize(gw * gh);
+		dist.resize(gw * gh);
+		for (uint i = 0; i < prev.size(); i++) {
+			prev[i] = -2;
+			dist[i] = INT32_MAX;
+		}
+		// Binary heap of (distance, cell)
+		Common::Array<Common::Pair<int, int> > heap;
+		auto heapPush = [&](int d, int c) {
+			heap.push_back(Common::Pair<int, int>(d, c));
+			uint i = heap.size() - 1;
+			while (i > 0) {
+				uint parent = (i - 1) / 2;
+				if (heap[parent].first <= heap[i].first)
+					break;
+				SWAP(heap[parent], heap[i]);
+				i = parent;
+			}
+		};
+		auto heapPop = [&]() {
+			Common::Pair<int, int> top = heap[0];
+			heap[0] = heap.back();
+			heap.pop_back();
+			uint i = 0;
+			for (;;) {
+				uint l = i * 2 + 1, r = l + 1, m = i;
+				if (l < heap.size() && heap[l].first < heap[m].first)
+					m = l;
+				if (r < heap.size() && heap[r].first < heap[m].first)
+					m = r;
+				if (m == i)
+					break;
+				SWAP(heap[m], heap[i]);
+				i = m;
+			}
+			return top;
+		};
+		int start = sy * gw + sx;
+		dist[start] = 0;
+		prev[start] = -1;
+		heapPush(0, start);
+		int found = -1;
+		int bestNear = start, bestNearDist = INT32_MAX;
+		while (!heap.empty()) {
+			Common::Pair<int, int> top = heapPop();
+			int cur = top.second;
+			if (top.first > dist[cur])
+				continue;
+			int cx = cur % gw, cy = cur / gw;
+			int d2 = (cx - tx) * (cx - tx) + (cy - ty) * (cy - ty);
+			if (d2 < bestNearDist) {
+				bestNearDist = d2;
+				bestNear = cur;
+			}
+			if (cx == tx && cy == ty) {
+				found = cur;
+				break;
+			}
+			static const int dirs[8][3] = {{1, 0, 10}, {-1, 0, 10}, {0, 1, 10}, {0, -1, 10}, {1, 1, 14}, {1, -1, 14}, {-1, 1, 14}, {-1, -1, 14}};
+			for (const auto &dd : dirs) {
+				int nx = cx + dd[0], ny = cy + dd[1];
+				if (nx < 0 || ny < 0 || nx >= gw || ny >= gh)
+					continue;
+				int ni = ny * gw + nx;
+				bool nearGoal = (ABS(nx - tx) <= 4 && ABS(ny - ty) <= 4) || (ABS(nx - sx) <= 2 && ABS(ny - sy) <= 2);
+				if (!free[ni] && !nearGoal)
+					continue;
+				int nd = dist[cur] + dd[2] + (40 - clearance[ni]) / 2;
+				if (nd < dist[ni]) {
+					dist[ni] = nd;
+					prev[ni] = cur;
+					heapPush(nd, ni);
+				}
+			}
+		}
+		if (found < 0) {
+			warning("AUTOPLAY: manille: no water path for leg %d, going as near as possible", leg);
+			found = bestNear;
+		}
+		Common::Array<Common::Point> legPath;
+		for (int c = found; c >= 0; c = prev[c])
+			legPath.push_back(Common::Point((c % gw) * kCell + kCell / 2, (c / gw) * kCell + kCell / 2));
+		for (int i = (int)legPath.size() - 1; i >= 0; i--)
+			_manillePath.push_back(legPath[i]);
+		_manilleLegEnds[leg] = _manillePath.size() - 1;
+		warning("AUTOPLAY: manille: leg %d from (%d,%d) to (%d,%d): %u cells", leg, (int)from.x, (int)from.y, (int)to.x, (int)to.y, legPath.size());
+	}
+	return !_manillePath.empty();
+}
+
+void AutoPlayer::playManille(Runtime *runtime, OSystem *system, uint32 now) {
+	VisualElement *map = findVisualByName(runtime, "map");
+	VisualElement *boat = findVisualByName(runtime, "boat");
+	if (!map || !boat || !map->isVisible()) {
+		warning("AUTOPLAY: manille: the map is gone (arrived or sunk)");
+		_manilleActive = false;
+		return;
+	}
+	const Common::Point mapPos = map->getGlobalPosition();
+	const Common::Point boatScreen(boat->getGlobalPosition().x + boat->getRelativeRect().width() / 2, boat->getGlobalPosition().y + boat->getRelativeRect().height() / 2);
+	const Common::Point boatLocal(boatScreen.x - mapPos.x, boatScreen.y - mapPos.y);
+
+	// The game's stop test compares the map x with the click y, so the boat doesn't reliably stop where it
+	// should: click again (which stops it and sets the next course) as soon as it reaches the waypoint
+	bool reached = false;
+	if (_manilleMoving) {
+		int32 tx = _manilleMoveTarget.x - _manilleMoveStart.x, ty = _manilleMoveTarget.y - _manilleMoveStart.y;
+		int32 px = boatLocal.x - _manilleMoveStart.x, py = boatLocal.y - _manilleMoveStart.y;
+		int32 len2 = tx * tx + ty * ty;
+		if (len2 > 0 && (px * tx + py * ty) * 20 >= len2 * 19)
+			reached = true;
+	}
+	if (mapPos != _manilleLastMapPos) {
+		_manilleLastMapPos = mapPos;
+		_manilleStillSince = now;
+		if (!reached)
+			return;
+	}
+	if (!reached && (now < _manilleStillSince + 300 || now < _manilleNextClick))
+		return;	// Still moving
+
+	// Stuck (on sand, the game only lets the boat move away from it): try the 4 directions, then plan again
+	if (!reached && _manilleMoving && boatLocal == _manilleMoveStart && now >= _manilleLastClick + 1500) {
+		// Directions whose first 40 px are free come first
+		static const int esc[8][2] = {{-60, 0}, {60, 0}, {0, -60}, {0, 60}, {-45, -45}, {45, -45}, {-45, 45}, {45, 45}};
+		int k = -1;
+		for (int tries = 0; tries < 8 && k < 0; tries++) {
+			int cand = (_manilleEscape + tries) % 8;
+			bool ok = true;
+			for (int d = 8; d <= 40 && ok; d += 4) {
+				int32 x = boatLocal.x + esc[cand][0] * d / 60, y = boatLocal.y + esc[cand][1] * d / 60;
+				int32 cx = x / 8, cy = y / 8;
+				ok = cx >= 0 && cy >= 0 && cx < _manilleGridW && cy < _manilleGridH && _manilleFree[cy * _manilleGridW + cx];
+			}
+			if (ok)
+				k = cand;
+		}
+		if (k < 0)
+			k = _manilleEscape % 8;
+		_manilleEscape = k + 1;
+		Common::Point click(boatScreen.x + esc[k][0], boatScreen.y + esc[k][1]);
+		warning("AUTOPLAY: manille: stuck at (%d,%d), trying direction %d", (int)boatLocal.x, (int)boatLocal.y, k);
+		saveScreenshot(system, Common::String::format("../build/auto/manille-stuck-%d-%d.png", (int)boatLocal.x, (int)boatLocal.y));
+		clickAt(runtime, system, click);
+		_manilleMoveStart = boatLocal;
+		_manilleMoveTarget = Common::Point(click.x - mapPos.x, click.y - mapPos.y);
+		_manilleStillSince = now;
+		_manilleLastClick = now;
+		_manilleNextClick = now + 1600;
+		_manilleNeedReplan = true;
+		return;
+	}
+	if (_manilleNeedReplan && boatLocal != _manilleMoveStart) {
+		// It moved: stop it and plan again from here
+		_manilleNeedReplan = false;
+		_manilleEscape = 0;
+		planManille(runtime);
+		_manilleIndex = 0;
+	}
+
+	// Skip the path points already reached, then aim at the farthest point within reach of a click
+	while (_manilleIndex < _manillePath.size()) {
+		const Common::Point &p = _manillePath[_manilleIndex];
+		if (ABS(p.x - boatLocal.x) <= 10 && ABS(p.y - boatLocal.y) <= 10)
+			_manilleIndex++;
+		else
+			break;
+	}
+	auto lineClear = [&](const Common::Point &a, const Common::Point &b) {
+		int32 ddx = b.x - a.x, ddy = b.y - a.y;
+		int32 steps = MAX<int32>(1, MAX<int32>(ABS(ddx), ABS(ddy)) / 3);
+		for (int32 k = 0; k <= steps; k++) {
+			int32 x = a.x + ddx * k / steps, y = a.y + ddy * k / steps;
+			int32 cx = x / 8, cy = y / 8;
+			if (cx < 0 || cy < 0 || cx >= _manilleGridW || cy >= _manilleGridH || !_manilleFree[cy * _manilleGridW + cx])
+				return false;
+		}
+		return true;
+	};
+
+	// Wait at the refuel points until the tank is full (the fuel gauge mToon is back to its first cel)
+	VisualElement *fuel = findVisualByName(runtime, "fuel");
+	uint32 fuelCel = 1;
+	if (MToonElement *fuelMToon = dynamic_cast<MToonElement *>(fuel)) {
+		DynamicValue cel;
+		Common::SharedPtr<MessageProperties> props(new MessageProperties(Event(), DynamicValue(), Common::WeakPtr<RuntimeObject>()));
+		MiniscriptThread thread(runtime, props, nullptr, nullptr, nullptr);
+		if (fuelMToon->readAttribute(&thread, cel, "cel") && cel.getType() == DynamicValueTypes::kInteger)
+			fuelCel = cel.getInt();
+	}
+	// A refill (the gauge going back down) completes the first pending refuel point
+	if (fuelCel < _manilleLastFuel) {
+		for (int leg = 0; leg < 2; leg++) {
+			if (!_manilleRefueled[leg]) {
+				_manilleRefueled[leg] = true;
+				warning("AUTOPLAY: manille: refueled at point %d", leg + 1);
+				_manilleRefuelStart = 0;
+				_manilleNeedReplan = false;
+				planManille(runtime);
+				_manilleIndex = 0;
+				break;
+			}
+		}
+	}
+	_manilleLastFuel = fuelCel;
+
+	for (int leg = 0; leg < 2; leg++) {
+		if (_manilleRefueled[leg] || (leg == 1 && !_manilleRefueled[0]))
+			continue;
+		const Common::Point end = _manilleRefuelPoint[leg];
+		// Close to the refuel zone: go to its center
+		if (ABS(end.x - boatLocal.x) < 120 && ABS(end.y - boatLocal.y) < 120 && (ABS(end.x - boatLocal.x) > 6 || ABS(end.y - boatLocal.y) > 6) && now >= _manilleLastClick + 1600 && fuelCel > 1 && lineClear(boatLocal, end)) {
+			Common::Point click(end.x + mapPos.x, end.y + mapPos.y);
+			click.x = CLIP<int16>(click.x, 166, 479);
+			click.y = CLIP<int16>(click.y, 131, 359);
+			clickAt(runtime, system, click);
+			_manilleMoving = true;
+			_manilleMoveStart = boatLocal;
+			_manilleMoveTarget = Common::Point(click.x - mapPos.x, click.y - mapPos.y);
+			_manilleLastClick = now;
+			_manilleNextClick = now + 1600;
+			_manilleStillSince = now;
+			return;
+		}
+		if (ABS(end.x - boatLocal.x) < 45 && ABS(end.y - boatLocal.y) < 45 && fuelCel > 1 && !_manilleRefueled[leg]) {
+			if (_manilleRefuelStart == 0)
+				_manilleRefuelStart = now;
+			if (now < _manilleRefuelStart + 25000)
+				return;
+		}
+		if (ABS(end.x - boatLocal.x) < 45 && ABS(end.y - boatLocal.y) < 45 && (fuelCel <= 1 || (_manilleRefuelStart && now >= _manilleRefuelStart + 25000))) {
+			if (!_manilleRefueled[leg])
+				warning("AUTOPLAY: manille: refueled at point %d", leg + 1);
+			_manilleRefueled[leg] = true;
+			_manilleRefuelStart = 0;
+		}
+	}
+
+	// Find the nearest path point to the boat from the current index on, in case the boat was stopped early
+	uint nearest = _manilleIndex;
+	int32 nearestDist = INT32_MAX;
+	for (uint i = _manilleIndex; i < _manillePath.size() && i < _manilleIndex + 60; i++) {
+		int32 d = (int32)(_manillePath[i].x - boatLocal.x) * (_manillePath[i].x - boatLocal.x) + (int32)(_manillePath[i].y - boatLocal.y) * (_manillePath[i].y - boatLocal.y);
+		if (d < nearestDist) {
+			nearestDist = d;
+			nearest = i;
+		}
+	}
+	_manilleIndex = nearest;
+	if (_manilleIndex + 1 >= _manillePath.size()) {
+		warning("AUTOPLAY: manille: end of the path");
+		_manilleActive = false;
+		return;
+	}
+	// The farthest path point (up to 14 cells, 112 px) that the boat reaches in a straight line through free cells
+	auto lineFree = [&](const Common::Point &a, const Common::Point &b) {
+		int32 ddx = b.x - a.x, ddy = b.y - a.y;
+		int32 steps = MAX<int32>(1, MAX<int32>(ABS(ddx), ABS(ddy)) / 3);
+		for (int32 k = 0; k <= steps; k++) {
+			int32 x = a.x + ddx * k / steps, y = a.y + ddy * k / steps;
+			int32 cx = x / 8, cy = y / 8;
+			if (cx < 0 || cy < 0 || cx >= _manilleGridW || cy >= _manilleGridH || !_manilleFree[cy * _manilleGridW + cx])
+				return false;
+		}
+		return true;
+	};
+	uint target = _manilleIndex + 1;
+	for (uint i = MIN<uint>(_manillePath.size() - 1, _manilleIndex + 19); i > _manilleIndex + 1; i--) {
+		if (lineFree(boatLocal, _manillePath[i])) {
+			target = i;
+			break;
+		}
+	}
+	Common::Point click(_manillePath[target].x + mapPos.x, _manillePath[target].y + mapPos.y);
+	click.x = CLIP<int16>(click.x, 166, 479);
+	click.y = CLIP<int16>(click.y, 131, 359);
+	debug(1, "MANILLE fuel=%u t=%u boat (%d,%d) path %u/%u click (%d,%d)", fuelCel, now, (int)boatLocal.x, (int)boatLocal.y, target, (uint)_manillePath.size(), (int)click.x, (int)click.y);
+	clickAt(runtime, system, click);
+	_manilleMoving = true;
+	_manilleMoveStart = boatLocal;
+	_manilleMoveTarget = Common::Point(click.x - mapPos.x, click.y - mapPos.y);
+	_manilleNextClick = now + 1600;
+	_manilleLastClick = now;
+	_manilleStillSince = now;
+}
+
+Structural *AutoPlayer::findStructural(Runtime *runtime, uint32 guid) const {
+	Common::Array<Structural *> stack;
+	runtime->getScenesInRenderOrder(stack);
+	while (!stack.empty()) {
+		Structural *structural = stack.back();
+		stack.pop_back();
+		if (structural->getStaticGUID() == guid)
+			return structural;
+		for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+			stack.push_back(child.get());
+	}
+	return nullptr;
+}
+
+void AutoPlayer::logElements(Runtime *runtime) const {
+	Common::Array<Structural *> scenes;
+	runtime->getScenesInRenderOrder(scenes);
+	for (Structural *scene : scenes) {
+		warning("AUTOPLAY: scene '%s'", scene->getName().c_str());
+		logElementTree(scene, 0);
+	}
+}
+
+} // End of namespace MTropolis

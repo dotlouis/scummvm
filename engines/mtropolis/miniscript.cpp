@@ -1974,7 +1974,7 @@ void MiniscriptThread::error(const Common::String &message) {
 	if (_runtime->debugGetDebugger())
 		_runtime->debugGetDebugger()->notify(kDebugSeverityError, Common::String("Miniscript error: " + message));
 #endif
-	warning("Miniscript error in (%x '%s'): %s", _modifier->getStaticGUID(), _modifier->getName().c_str(), message.c_str());
+	warning("Miniscript error in (%x '%s') at %u: %s", _modifier->getStaticGUID(), _modifier->getName().c_str(), static_cast<uint>(_currentInstruction - 1), message.c_str());
 
 	// This should be redundant
 	_failed = true;
