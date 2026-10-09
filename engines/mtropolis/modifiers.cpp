@@ -30,6 +30,7 @@
 #include "mtropolis/miniscript.h"
 #include "mtropolis/modifiers.h"
 #include "mtropolis/modifier_factory.h"
+#include "mtropolis/mtropolis.h"
 #include "mtropolis/saveload.h"
 
 #include "mtropolis/elements.h"
@@ -66,6 +67,52 @@ bool CompoundVarLoader::readSave(Common::ReadStream *stream, uint32 saveFileVers
 		return false;
 
 	saveLoad->commitLoad();
+
+	return true;
+}
+
+// Copies variable values from a variable loaded from an mTropolis variable file into a project variable
+static bool transferVariableState(Runtime *runtime, Modifier *dest, Modifier *src) {
+	if (dest->isCompoundVariable() && src->isCompoundVariable()) {
+		const Common::Array<Common::SharedPtr<Modifier> > &destChildren = dest->getChildContainer()->getModifiers();
+		const Common::Array<Common::SharedPtr<Modifier> > &srcChildren = src->getChildContainer()->getModifiers();
+
+		if (destChildren.size() != srcChildren.size())
+			warning("Compound variable '%s' has %u children but the variable file has %u", dest->getName().c_str(), static_cast<uint>(destChildren.size()), static_cast<uint>(srcChildren.size()));
+
+		bool succeeded = true;
+		for (size_t i = 0; i < destChildren.size() && i < srcChildren.size(); i++) {
+			if (!transferVariableState(runtime, destChildren[i].get(), srcChildren[i].get()))
+				succeeded = false;
+		}
+
+		return succeeded;
+	}
+
+	if (!dest->isVariable() || !src->isVariable() || strcmp(dest->getDefaultName(), src->getDefaultName()) != 0) {
+		warning("Variable '%s' type doesn't match the variable file (%s vs %s)", dest->getName().c_str(), dest->getDefaultName(), src->getDefaultName());
+		return false;
+	}
+
+	Common::SharedPtr<ModifierSaveLoad> srcSaveLoad = src->getSaveLoad(runtime);
+	Common::SharedPtr<ModifierSaveLoad> destSaveLoad = dest->getSaveLoad(runtime);
+	if (!srcSaveLoad || !destSaveLoad)
+		return false;
+
+	// The save data header identifies the modifier, so make it match the destination
+	src->setName(dest->getName());
+
+	Common::MemoryWriteStreamDynamic writeStream(DisposeAfterUse::YES);
+	srcSaveLoad->save(src, &writeStream);
+	WRITE_BE_UINT32(writeStream.getData(), dest->getStaticGUID());
+
+	Common::MemoryReadStream readStream(writeStream.getData(), writeStream.size());
+	if (!destSaveLoad->load(dest, &readStream, MTropolisEngine::kCurrentSaveFileVersion))
+		return false;
+
+	destSaveLoad->commitLoad();
+
+	debug(2, "Loaded variable '%s' from variable file", dest->getName().c_str());
 
 	return true;
 }
@@ -448,8 +495,14 @@ VThreadState SaveAndRestoreModifier::consumeMessage(Runtime *runtime, const Comm
 		bool succeeded = false;
 		if (isPrompt)
 			succeeded = runtime->getLoadProvider()->promptLoad(&loader);
-		else
+		else if (runtime->getLoadProvider()->namedSaveExists(_fileName))
 			succeeded = runtime->getLoadProvider()->namedLoad(&loader, _fileName);
+		else {
+			// No save yet, use the file from the game directory if there is one
+			Common::SharedPtr<Modifier> fileVar = runtime->getProject()->loadVariableFile(_filePath, _fileName);
+			if (fileVar)
+				succeeded = transferVariableState(runtime, static_cast<Modifier *>(obj), fileVar.get());
+		}
 
 		if (succeeded) {
 			for (const Common::SharedPtr<SaveLoadHooks> &hooks : runtime->getHacks().saveLoadHooks)

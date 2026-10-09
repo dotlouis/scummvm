@@ -2497,6 +2497,9 @@ public:
 	size_t getSegmentForStreamIndex(size_t streamIndex) const;
 	void openSegmentStream(int segmentIndex);
 	void closeSegmentStream(int segmentIndex);
+
+	// Loads a variable modifier from a file written by the mTropolis Save and Restore modifier
+	Common::SharedPtr<Modifier> loadVariableFile(const Common::String &filePath, const Common::String &fileName);
 	Common::SeekableReadStream *getStreamForSegment(int segmentIndex);
 
 	const Common::String *findNameOfLabel(const Label &label) const;

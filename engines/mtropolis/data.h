@@ -396,6 +396,11 @@ struct XPFloatPOD {
 	Common::XPFloat toXPFloat() const;
 };
 
+struct XPFloatVectorPOD {
+	XPFloatPOD angleRadians;
+	XPFloatPOD magnitude;
+};
+
 struct Label {
 	bool load(DataReader &reader);
 
@@ -472,6 +477,7 @@ struct PlugInTypeTaggedValue : public Common::NonCopyable {
 		kPoint = 0xa,
 		kIntegerRange = 0xb,
 		kFloat = 0xf,
+		kVector = 0x10,
 		kBoolean = 0x14,
 		kEvent = 0x17,
 		kLabel = 0x64,
@@ -491,6 +497,7 @@ struct PlugInTypeTaggedValue : public Common::NonCopyable {
 		ColorRGB16 asColor;
 		IntRange asIntRange;
 		XPFloatPOD asFloat;
+		XPFloatVectorPOD asVector;
 		uint16 asBoolean;
 		Event asEvent;
 		Label asLabel;

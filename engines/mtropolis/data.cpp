@@ -545,6 +545,13 @@ bool PlugInTypeTaggedValue::load(DataReader &reader) {
 		if (!value.asFloat.load(reader))
 			return false;
 		break;
+	case kVector: {
+			value.constructField(&ValueUnion::asVector);
+			// Angle, unknown (always 0?), magnitude
+			XPFloatPOD unknown;
+			if (!value.asVector.angleRadians.load(reader) || !unknown.load(reader) || !value.asVector.magnitude.load(reader))
+				return false;
+		} break;
 	case kBoolean:
 		value.constructField(&ValueUnion::asBoolean);
 		if (!reader.readU16(value.asBoolean))

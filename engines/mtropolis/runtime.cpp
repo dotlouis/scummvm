@@ -26,6 +26,7 @@
 #include "common/random.h"
 #include "common/substream.h"
 #include "common/system.h"
+#include "common/tokenizer.h"
 
 #include "graphics/cursorman.h"
 #include "graphics/managed_surface.h"
@@ -1358,6 +1359,10 @@ bool DynamicValue::loadConstant(const Data::PlugInTypeTaggedValue &data) {
 	case Data::PlugInTypeTaggedValue::kBoolean:
 		_type = DynamicValueTypes::kBoolean;
 		_value.construct<bool, &ValueUnion::asBool>(data.value.asBoolean != 0);
+		break;
+	case Data::PlugInTypeTaggedValue::kVector:
+		_type = DynamicValueTypes::kVector;
+		_value.construct<AngleMagVector, &ValueUnion::asVector>(AngleMagVector::createRadians(data.value.asVector.angleRadians.toXPFloat().toDouble(), data.value.asVector.magnitude.toXPFloat().toDouble()));
 		break;
 	case Data::PlugInTypeTaggedValue::kEvent:
 		_type = DynamicValueTypes::kEvent;
@@ -8117,6 +8122,73 @@ void Project::closeSegmentStream(int segmentIndex) {
 	segment.unloadSignaller.reset();
 	segment.rcStream.reset();
 	segment.weakStream = nullptr;
+}
+
+Common::SharedPtr<Modifier> Project::loadVariableFile(const Common::String &filePath, const Common::String &fileName) {
+	const char *startupSegmentFolder = "<Startup Segment Folder>";
+
+	Common::String relativeDir = filePath;
+	if (relativeDir.hasPrefixIgnoreCase(startupSegmentFolder))
+		relativeDir = relativeDir.substr(strlen(startupSegmentFolder));
+	else if (!relativeDir.empty()) {
+		warning("Variable file path '%s' isn't relative to the startup segment folder, looking in the project directory instead", filePath.c_str());
+		relativeDir.clear();
+	}
+
+	Common::Path path = _projectRootDir;
+	for (const Common::String &component : Common::StringTokenizer(relativeDir, "/\\:").split())
+		path = path.appendComponent(component);
+	path = path.appendComponent(fileName);
+
+	Common::ScopedPtr<Common::SeekableReadStream> stream;
+	if (_platform == kProjectPlatformMacintosh)
+		stream.reset(Common::MacResManager::openFileOrDataFork(path, *_rootArchive));
+	else
+		stream.reset(_rootArchive->createReadStreamForMember(path));
+
+	if (!stream) {
+		debug(1, "Variable file '%s' doesn't exist", path.toString().c_str());
+		return nullptr;
+	}
+
+	Data::DataReader reader(0, *stream, (_platform == kProjectPlatformMacintosh) ? Data::kDataFormatMacintosh : Data::kDataFormatWindows, _runtimeVersion, false);
+
+	// Unknown header, always 0
+	uint32 header = 0;
+	if (!reader.readU32(header) || header != 0) {
+		warning("Variable file '%s' has an unexpected header", path.toString().c_str());
+		return nullptr;
+	}
+
+	const Data::PlugInModifierRegistry &plugInDataLoaderRegistry = _plugInRegistry.getDataLoaderRegistry();
+
+	Common::SharedPtr<Data::DataObject> dataObject;
+	Data::loadDataObject(plugInDataLoaderRegistry, reader, dataObject);
+
+	if (!dataObject || !Data::DataObjectTypes::isModifier(dataObject->getType())) {
+		warning("Variable file '%s' doesn't contain a modifier", path.toString().c_str());
+		return nullptr;
+	}
+
+	ChildLoaderStack loaderStack;
+	ModifierLoaderContext loaderContext(&loaderStack);
+	Common::SharedPtr<Modifier> modifier = loadModifierObject(loaderContext, *dataObject);
+
+	// Compound variable children follow their parent
+	while (!loaderStack.contexts.empty()) {
+		dataObject.reset();
+		Data::loadDataObject(plugInDataLoaderRegistry, reader, dataObject);
+		if (!dataObject || !Data::DataObjectTypes::isModifier(dataObject->getType())) {
+			warning("Failed to load child modifiers from variable file '%s'", path.toString().c_str());
+			return nullptr;
+		}
+
+		loadContextualObject(0, loaderStack, *dataObject);
+	}
+
+	debug(1, "Loaded variable file '%s'", path.toString().c_str());
+
+	return modifier;
 }
 
 Common::SeekableReadStream* Project::getStreamForSegment(int segmentIndex) {

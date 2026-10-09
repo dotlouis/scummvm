@@ -189,6 +189,10 @@ bool MTropolisEngine::namedLoad(ISaveReader *reader, const Common::String &fileN
 	return load(reader, getUnpromptedSaveFileName(fileName));
 }
 
+bool MTropolisEngine::namedSaveExists(const Common::String &fileName) {
+	return _saveFileMan->exists(getUnpromptedSaveFileName(fileName));
+}
+
 bool MTropolisEngine::autoSave(ISaveWriter *writer) {
 	ISaveWriter *oldWriter = _saveWriter;
 	bool oldIsTriggeredAutosave = _isTriggeredAutosave;

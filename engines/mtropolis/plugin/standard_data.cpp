@@ -136,6 +136,10 @@ DataReadErrorCode ListVariableModifier::load(PlugIn &plugIn, const PlugInModifie
 				return kDataReadErrorReadFailed;
 
 			havePersistentData = (persistentFlag.value.asBoolean != 0);
+
+			// Variable files written by the Save and Restore modifier contain values even if the flag is off
+			if (!havePersistentData && reader.tell() < privateDataPos + static_cast<int64>(prefix.subObjectSize))
+				havePersistentData = true;
 		}
 
 		if (havePersistentData) {
@@ -150,6 +154,7 @@ DataReadErrorCode ListVariableModifier::load(PlugIn &plugIn, const PlugInModifie
 				if (!values[i].load(reader)) {
 					if (static_cast<const MTropolis::Standard::StandardPlugIn &>(plugIn).getHacks().allowGarbledListModData) {
 						persistentValuesGarbled = true;
+						numValues = i;
 						if (!reader.seek(privateDataPos + prefix.subObjectSize))
 							return kDataReadErrorReadFailed;
 						break;

@@ -68,8 +68,11 @@ public:
 	bool autoSave(ISaveWriter *writer) override;
 	bool promptLoad(ISaveReader *reader) override;
 	bool namedLoad(ISaveReader *reader, const Common::String &fileName) override;
+	bool namedSaveExists(const Common::String &fileName) override;
 
 	const Graphics::Surface *getSavegameScreenshot() const;
+
+	static const uint kCurrentSaveFileVersion = 2;
 
 	Common::Error saveGameStream(Common::WriteStream *stream, bool isAutosave) override;
 	bool canSaveAutosaveCurrently() override;
@@ -87,7 +90,6 @@ private:
 
 	Common::String getUnpromptedSaveFileName(const Common::String &fileName);
 
-	static const uint kCurrentSaveFileVersion = 2;
 	static const uint kEarliestSupportedSaveFileVersion = 2;
 	static const uint kSavegameSignature = 0x6d545356;	// mTSV
 

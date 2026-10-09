@@ -59,6 +59,7 @@ struct ISaveUIProvider : public IInterfaceBase {
 struct ILoadUIProvider : public IInterfaceBase {
 	virtual bool promptLoad(ISaveReader *reader) = 0;
 	virtual bool namedLoad(ISaveReader *reader, const Common::String &fileName) = 0;
+	virtual bool namedSaveExists(const Common::String &fileName) = 0;
 };
 
 struct IAutoSaveProvider : public IInterfaceBase {
