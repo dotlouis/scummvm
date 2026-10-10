@@ -3051,7 +3051,7 @@ MiniscriptInstructionOutcome WorldManagerInterface::writeRefAttribute(Miniscript
 	} else if (attrib == "cursor") {
 		DynamicValueWriteFuncHelper<WorldManagerInterface, &WorldManagerInterface::setCursor, true>::create(this, result);
 		return kMiniscriptInstructionOutcomeContinue;
-	} else if (attrib == "cursorelement") {
+	} else if (attrib == "cursorelement" || attrib == "cursorhotspot") {
 		// Not implemented, the element isn't used as the cursor
 		DynamicValueWriteDiscardHelper::create(result);
 		return kMiniscriptInstructionOutcomeContinue;
@@ -9337,8 +9337,31 @@ bool VisualElement::readAttribute(MiniscriptThread *thread, DynamicValue &result
 	return Element::readAttribute(thread, result, attrib);
 }
 
+MiniscriptInstructionOutcome VisualElement::AssetWriteProxyInterface::write(MiniscriptThread *thread, const DynamicValue &dest, void *objectRef, uintptr ptrOrOffset) {
+	return kMiniscriptInstructionOutcomeFailed;
+}
+
+MiniscriptInstructionOutcome VisualElement::AssetWriteProxyInterface::refAttrib(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib) {
+	// Assets are loaded when needed anyway, so preloading has no effect
+	if (attrib == "preload") {
+		DynamicValueWriteDiscardHelper::create(proxy);
+		return kMiniscriptInstructionOutcomeContinue;
+	}
+
+	return kMiniscriptInstructionOutcomeFailed;
+}
+
+MiniscriptInstructionOutcome VisualElement::AssetWriteProxyInterface::refAttribIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib, const DynamicValue &index) {
+	return kMiniscriptInstructionOutcomeFailed;
+}
+
 MiniscriptInstructionOutcome VisualElement::writeRefAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib) {
-	if (attrib == "visible") {
+	if (attrib == "asset") {
+		writeProxy.pod.ifc = DynamicValueWriteInterfaceGlue<AssetWriteProxyInterface>::getInstance();
+		writeProxy.pod.objectRef = this;
+		writeProxy.pod.ptrOrOffset = 0;
+		return kMiniscriptInstructionOutcomeContinue;
+	} else if (attrib == "visible") {
 		DynamicValueWriteFuncHelper<VisualElement, &VisualElement::scriptSetVisibility, true>::create(this, writeProxy);
 		return kMiniscriptInstructionOutcomeContinue;
 	} else if (attrib == "direct") {
@@ -9349,6 +9372,9 @@ MiniscriptInstructionOutcome VisualElement::writeRefAttribute(MiniscriptThread *
 		return kMiniscriptInstructionOutcomeContinue;
 	} else if (attrib == "size") {
 		DynamicValueWriteOrRefAttribFuncHelper<VisualElement, &VisualElement::scriptSetSize, &VisualElement::scriptWriteRefSizeAttribute>::create(this, writeProxy);
+		return kMiniscriptInstructionOutcomeContinue;
+	} else if (attrib == "globalposition") {
+		DynamicValueWriteFuncHelper<VisualElement, &VisualElement::scriptSetGlobalPosition, true>::create(this, writeProxy);
 		return kMiniscriptInstructionOutcomeContinue;
 	} else if (attrib == "centerposition") {
 		DynamicValueWriteOrRefAttribFuncHelper<VisualElement, &VisualElement::scriptSetCenterPosition, &VisualElement::scriptWriteRefCenterPositionAttribute>::create(this, writeProxy);
@@ -9655,6 +9681,19 @@ MiniscriptInstructionOutcome VisualElement::scriptSetPosition(MiniscriptThread *
 	// Assigning non-point values to position silently fails
 	// Obsidian relies on this behavior due to a bug in the air puzzle completion script
 	return kMiniscriptInstructionOutcomeContinue;
+}
+
+MiniscriptInstructionOutcome VisualElement::scriptSetGlobalPosition(MiniscriptThread *thread, const DynamicValue &value) {
+	if (value.getType() != DynamicValueTypes::kPoint)
+		return kMiniscriptInstructionOutcomeContinue;
+
+	// The position is relative to the parent, so remove the parent's global position
+	Common::Point globalPoint = value.getPoint();
+	Common::Point currentGlobal = getGlobalPosition();
+	DynamicValue relativePoint;
+	relativePoint.setPoint(Common::Point(globalPoint.x - currentGlobal.x + _rect.left, globalPoint.y - currentGlobal.y + _rect.top));
+
+	return scriptSetPosition(thread, relativePoint);
 }
 
 MiniscriptInstructionOutcome VisualElement::scriptSetPositionX(MiniscriptThread *thread, const DynamicValue &dest) {

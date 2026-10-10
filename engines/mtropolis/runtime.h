@@ -2932,10 +2932,18 @@ protected:
 	// Draws the display bitmap if a source is set, returns false if the element should render its own contents
 	bool renderDisplayBitmap(Window *window);
 
+	// Write proxy for "asset", which only accepts the "preload" hint
+	struct AssetWriteProxyInterface {
+		static MiniscriptInstructionOutcome write(MiniscriptThread *thread, const DynamicValue &dest, void *objectRef, uintptr ptrOrOffset);
+		static MiniscriptInstructionOutcome refAttrib(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib);
+		static MiniscriptInstructionOutcome refAttribIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib, const DynamicValue &index);
+	};
+
 	bool loadCommon(const Common::String &name, uint32 guid, const Data::Rect &rect, uint32 elementFlags, uint16 layer, uint32 streamLocator, uint16 sectionID);
 
 	MiniscriptInstructionOutcome scriptSetDirect(MiniscriptThread *thread, const DynamicValue &dest);
 	MiniscriptInstructionOutcome scriptSetPosition(MiniscriptThread *thread, const DynamicValue &dest);
+	MiniscriptInstructionOutcome scriptSetGlobalPosition(MiniscriptThread *thread, const DynamicValue &dest);
 	MiniscriptInstructionOutcome scriptSetPositionX(MiniscriptThread *thread, const DynamicValue &dest);
 	MiniscriptInstructionOutcome scriptSetPositionY(MiniscriptThread *thread, const DynamicValue &dest);
 	MiniscriptInstructionOutcome scriptSetCenterPosition(MiniscriptThread *thread, const DynamicValue &dest);
