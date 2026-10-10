@@ -107,6 +107,9 @@ private:
 	bool _haveSize;
 	int32 _sizeX;
 	int32 _sizeY;
+
+	// Rotation angle in degrees
+	double _angle;
 };
 
 class TrackerModifier : public Modifier {

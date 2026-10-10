@@ -26,7 +26,7 @@ namespace MTropolis {
 
 namespace Thereware {
 
-RotatorModifier::RotatorModifier() : _haveSize(false), _sizeX(0), _sizeY(0) {
+RotatorModifier::RotatorModifier() : _haveSize(false), _sizeX(0), _sizeY(0), _angle(0.0) {
 }
 
 RotatorModifier::~RotatorModifier() {
@@ -57,6 +57,10 @@ bool RotatorModifier::readAttribute(MiniscriptThread *thread, DynamicValue &resu
 		result.setPoint(Common::Point(_sizeX, _sizeY));
 		return true;
 	}
+	if (attrib == "angle") {
+		result.setFloat(_angle);
+		return true;
+	}
 
 	return Modifier::readAttribute(thread, result, attrib);
 }
@@ -65,6 +69,10 @@ MiniscriptInstructionOutcome RotatorModifier::writeRefAttribute(MiniscriptThread
 	if (attrib == "size") {
 		initSize();
 		DynamicValueWriteOrRefAttribFuncHelper<RotatorModifier, &RotatorModifier::scriptSetSize, &RotatorModifier::scriptWriteRefSizeAttribute>::create(this, result);
+		return kMiniscriptInstructionOutcomeContinue;
+	}
+	if (attrib == "angle") {
+		DynamicValueWriteFloatHelper<double>::create(&_angle, result);
 		return kMiniscriptInstructionOutcomeContinue;
 	}
 
