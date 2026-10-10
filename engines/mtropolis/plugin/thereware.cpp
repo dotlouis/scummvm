@@ -26,7 +26,7 @@ namespace MTropolis {
 
 namespace Thereware {
 
-RotatorModifier::RotatorModifier() {
+RotatorModifier::RotatorModifier() : _haveSize(false), _sizeX(0), _sizeY(0) {
 }
 
 RotatorModifier::~RotatorModifier() {
@@ -36,19 +36,61 @@ bool RotatorModifier::load(const PlugInModifierLoaderContext &context, const Dat
 	return true;
 }
 
+void RotatorModifier::initSize() {
+	if (_haveSize)
+		return;
+
+	Structural *owner = findStructuralOwner();
+	if (owner && owner->isElement() && static_cast<Element *>(owner)->isVisual()) {
+		const Common::Rect &rect = static_cast<VisualElement *>(owner)->getRelativeRect();
+		_sizeX = rect.width();
+		_sizeY = rect.height();
+	}
+	_haveSize = true;
+}
+
 bool RotatorModifier::readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) {
-	// Rotation isn't implemented, so the rotated image always has the size of the element
+	// Rotation isn't implemented, the size is only stored. It starts as the size of the element,
+	// which is what an unrotated image has.
 	if (attrib == "size") {
-		Structural *owner = findStructuralOwner();
-		if (owner && owner->isElement() && static_cast<Element *>(owner)->isVisual()) {
-			const Common::Rect &rect = static_cast<VisualElement *>(owner)->getRelativeRect();
-			result.setPoint(Common::Point(rect.width(), rect.height()));
-		} else
-			result.setPoint(Common::Point(0, 0));
+		initSize();
+		result.setPoint(Common::Point(_sizeX, _sizeY));
 		return true;
 	}
 
 	return Modifier::readAttribute(thread, result, attrib);
+}
+
+MiniscriptInstructionOutcome RotatorModifier::writeRefAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &result, const Common::String &attrib) {
+	if (attrib == "size") {
+		initSize();
+		DynamicValueWriteOrRefAttribFuncHelper<RotatorModifier, &RotatorModifier::scriptSetSize, &RotatorModifier::scriptWriteRefSizeAttribute>::create(this, result);
+		return kMiniscriptInstructionOutcomeContinue;
+	}
+
+	return Modifier::writeRefAttribute(thread, result, attrib);
+}
+
+MiniscriptInstructionOutcome RotatorModifier::scriptSetSize(MiniscriptThread *thread, const DynamicValue &value) {
+	if (value.getType() != DynamicValueTypes::kPoint)
+		return kMiniscriptInstructionOutcomeFailed;
+
+	_sizeX = value.getPoint().x;
+	_sizeY = value.getPoint().y;
+	return kMiniscriptInstructionOutcomeContinue;
+}
+
+MiniscriptInstructionOutcome RotatorModifier::scriptWriteRefSizeAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib) {
+	if (attrib == "x") {
+		DynamicValueWriteIntegerHelper<int32>::create(&_sizeX, proxy);
+		return kMiniscriptInstructionOutcomeContinue;
+	}
+	if (attrib == "y") {
+		DynamicValueWriteIntegerHelper<int32>::create(&_sizeY, proxy);
+		return kMiniscriptInstructionOutcomeContinue;
+	}
+
+	return kMiniscriptInstructionOutcomeFailed;
 }
 
 bool RotatorModifier::respondsToEvent(const Event &evt) const {

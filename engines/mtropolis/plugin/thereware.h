@@ -83,6 +83,7 @@ public:
 	bool load(const PlugInModifierLoaderContext &context, const Data::Thereware::RotatorModifier &data);
 
 	bool readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) override;
+	MiniscriptInstructionOutcome writeRefAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &result, const Common::String &attrib) override;
 
 	bool respondsToEvent(const Event &evt) const override;
 	VThreadState consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) override;
@@ -97,6 +98,15 @@ public:
 private:
 	Common::SharedPtr<Modifier> shallowClone() const override;
 	const char *getDefaultName() const override;
+
+	MiniscriptInstructionOutcome scriptSetSize(MiniscriptThread *thread, const DynamicValue &value);
+	MiniscriptInstructionOutcome scriptWriteRefSizeAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib);
+	void initSize();
+
+	// Size of the rotated image, starts as the size of the element
+	bool _haveSize;
+	int32 _sizeX;
+	int32 _sizeY;
 };
 
 class TrackerModifier : public Modifier {
