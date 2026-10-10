@@ -337,8 +337,8 @@ bool ScaleBitmapModifier::load(const PlugInModifierLoaderContext &context, const
 	if (data.scaleWhen.type != Data::PlugInTypeTaggedValue::kEvent || data.bitmapVar.type != Data::PlugInTypeTaggedValue::kVariableReference)
 		return false;
 
-	// The size has only been seen as incoming data
-	if (data.size.type != Data::PlugInTypeTaggedValue::kIncomingData)
+	// The size is usually the incoming data, but can be a constant or a variable
+	if (!_size.load(data.size))
 		return false;
 
 	if (!_scaleWhen.load(data.scaleWhen.value.asEvent))
@@ -363,7 +363,7 @@ VThreadState ScaleBitmapModifier::consumeMessage(Runtime *runtime, const Common:
 		return kVThreadReturn;
 	}
 
-	const DynamicValue &size = msg->getValue();
+	DynamicValue size = _size.produceValue(msg->getValue()).dereference();
 	if (size.getType() != DynamicValueTypes::kPoint) {
 		warning("Scale Bitmap modifier expected a point size");
 		return kVThreadReturn;
@@ -392,10 +392,12 @@ void ScaleBitmapModifier::disable(Runtime *runtime) {
 
 void ScaleBitmapModifier::linkInternalReferences(ObjectLinkingScope *scope) {
 	_bitmapVar.linkInternalReferences(scope);
+	_size.linkInternalReferences(scope);
 }
 
 void ScaleBitmapModifier::visitInternalReferences(IStructuralReferenceVisitor *visitor) {
 	_bitmapVar.visitInternalReferences(visitor);
+	_size.visitInternalReferences(visitor);
 }
 
 #ifdef MTROPOLIS_DEBUG_ENABLE

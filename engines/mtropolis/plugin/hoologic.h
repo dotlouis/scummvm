@@ -191,6 +191,7 @@ private:
 
 	Event _scaleWhen;
 	VarReference _bitmapVar;
+	DynamicValueSource _size;
 };
 
 class SaveBitmapModifier : public Modifier {
