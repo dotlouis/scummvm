@@ -2214,6 +2214,7 @@ public:
 
 	const Common::Array<Common::SharedPtr<Structural> > &getChildren() const;
 	void addChild(const Common::SharedPtr<Structural> &child);
+	void addChildAfter(const Common::SharedPtr<Structural> &child, const Structural *sibling);
 	void removeAllChildren();
 	void removeAllModifiers();
 	void removeChild(Structural *child);

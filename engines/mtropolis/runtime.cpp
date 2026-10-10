@@ -351,6 +351,9 @@ void ObjectRefRemapper::visitChildStructuralRef(Common::SharedPtr<Structural> &s
 		Common::HashMap<RuntimeObject *, RuntimeObject *> ::const_iterator it = _objectRemaps.find(obj);
 		if (it != _objectRemaps.end())
 			structural = it->_value->getSelfReference().lock().staticCast<Structural>();
+
+		// Remap the references inside the clone too, so they point to the cloned objects instead of the originals
+		structural->visitInternalReferences(this);
 	}
 }
 
@@ -360,6 +363,8 @@ void ObjectRefRemapper::visitChildModifierRef(Common::SharedPtr<Modifier> &modif
 		Common::HashMap<RuntimeObject *, RuntimeObject *>::const_iterator it = _objectRemaps.find(obj);
 		if (it != _objectRemaps.end())
 			modifier = it->_value->getSelfReference().lock().staticCast<Modifier>();
+
+		modifier->visitInternalReferences(this);
 	}
 }
 
@@ -2435,7 +2440,8 @@ void MessengerSendSpec::resolveVariableObjectType(RuntimeObject *obj, Common::We
 }
 
 void MessengerSendSpec::sendFromMessenger(Runtime *runtime, Modifier *sender, RuntimeObject *triggerSource, const DynamicValue &incomingData, RuntimeObject *customDestination) const {
-	sendFromMessengerWithCustomData(runtime, sender, triggerSource, this->with.produceValue(incomingData), customDestination);
+	DynamicValue withValue = this->with.produceValue(incomingData);
+	sendFromMessengerWithCustomData(runtime, sender, triggerSource, withValue, customDestination);
 }
 
 void MessengerSendSpec::sendFromMessengerWithCustomData(Runtime *runtime, Modifier *sender, RuntimeObject *triggerSource, const DynamicValue &data, RuntimeObject *customDestination) const {
@@ -3653,6 +3659,19 @@ const Common::Array<Common::SharedPtr<Structural> > &Structural::getChildren() c
 void Structural::addChild(const Common::SharedPtr<Structural>& child) {
 	_children.push_back(child);
 	child->setParent(this);
+}
+
+// Inserts a child right after an existing one, or at the end if it isn't found
+void Structural::addChildAfter(const Common::SharedPtr<Structural> &child, const Structural *sibling) {
+	for (size_t i = 0; i < _children.size(); i++) {
+		if (_children[i].get() == sibling) {
+			_children.insert_at(i + 1, child);
+			child->setParent(this);
+			return;
+		}
+	}
+
+	addChild(child);
 }
 
 void Structural::removeAllChildren() {
@@ -5383,6 +5402,7 @@ void Runtime::executeCloneObject(RuntimeObject *object) {
 		}
 	} else if (object->isStructural()) {
 		Common::SharedPtr<Structural> structuralRef = object->getSelfReference().lock().staticCast<Structural>();
+		Structural *original = structuralRef.get();
 		Common::WeakPtr<RuntimeObject> relinkParent = structuralRef->getParent()->getSelfReference();
 
 		ObjectCloner cloner(this, relinkParent, &objectRemaps);
@@ -5391,7 +5411,9 @@ void Runtime::executeCloneObject(RuntimeObject *object) {
 		ObjectRefRemapper remapper(objectRemaps);
 		remapper.visitChildStructuralRef(structuralRef);
 
-		structuralRef->getParent()->addChild(structuralRef);
+		// The clone comes right after the original. Scripts rely on this to reach the original
+		// from the clone and back with the "previous element" and "next element" destinations.
+		structuralRef->getParent()->addChildAfter(structuralRef, original);
 
 		// Objects in scenes that were never shown (e.g. library scenes) never had their default visibility
 		// applied, so give the clone its authored visibility before its scripts run.
