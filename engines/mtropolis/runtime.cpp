@@ -2215,7 +2215,23 @@ MiniscriptInstructionOutcome DynamicValueWriteObjectHelper::write(MiniscriptThre
 }
 
 MiniscriptInstructionOutcome DynamicValueWriteObjectHelper::refAttrib(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib) {
-	return static_cast<RuntimeObject *>(objectRef)->writeRefAttribute(thread, proxy, attrib);
+	RuntimeObject *obj = static_cast<RuntimeObject *>(objectRef);
+	MiniscriptInstructionOutcome outcome = obj->writeRefAttribute(thread, proxy, attrib);
+	if (outcome != kMiniscriptInstructionOutcomeFailed)
+		return outcome;
+
+	// A read-only attribute in the middle of an l-value path, like "element" in
+	// "source.parent.element.position", is read: if it is an object, the rest of the path applies to that object.
+	DynamicValue value;
+	if (obj->readAttribute(thread, value, attrib) && value.getType() == DynamicValueTypes::kObject) {
+		Common::SharedPtr<RuntimeObject> target = value.getObject().object.lock();
+		if (target) {
+			create(target.get(), proxy);
+			return kMiniscriptInstructionOutcomeContinue;
+		}
+	}
+
+	return kMiniscriptInstructionOutcomeFailed;
 }
 
 MiniscriptInstructionOutcome DynamicValueWriteObjectHelper::refAttribIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib, const DynamicValue &index) {
