@@ -8713,8 +8713,11 @@ Common::SharedPtr<Modifier> Project::loadModifierObject(ModifierLoaderContext &l
 
 		modifier = factory->createModifier(loaderContext, dataObject);
 	}
-	if (!modifier)
-		error("Modifier object failed to load");
+	if (!modifier) {
+		if (dataObject.getType() == Data::DataObjectTypes::kPlugInModifier)
+			error("Plug-in modifier '%s' failed to load", static_cast<const Data::PlugInModifier &>(dataObject).modifierName);
+		error("Modifier object of type %x failed to load", static_cast<uint>(dataObject.getType()));
+	}
 	assert(modifier->getModifierFlags().flagsWereLoaded);
 
 	uint32 guid = modifier->getStaticGUID();
