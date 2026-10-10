@@ -19,7 +19,13 @@
  *
  */
 
+#include "common/config-manager.h"
+#include "common/savefile.h"
+#include "common/system.h"
+
 #include "graphics/managed_surface.h"
+
+#include "image/bmp.h"
 
 #include "mtropolis/plugin/hoologic.h"
 #include "mtropolis/plugins.h"
@@ -221,6 +227,54 @@ const char *CaptureBitmapModifier::getDefaultName() const {
 	return "Capture Bitmap Modifier"; // ???
 }
 
+namespace {
+
+// Bitmaps saved by the Save Bitmap modifier go to the save folder, named after the game target and the path
+// the game gives (for example "<player>/photo1/photo3" for Uncle Albert's photos), and Import Bitmap reads them back.
+Common::String bitmapFileName(const Common::String &path) {
+	Common::String name;
+	bool inToken = false;
+	for (char c : path) {
+		if (c == '<')
+			inToken = true;
+		else if (c == '>')
+			inToken = false;
+		else if (inToken)
+			continue;
+		else if (Common::isAlnum(c) || c == '_' || c == '-')
+			name += c;
+		else if (!name.empty() && name.lastChar() != '-')
+			name += '-';
+	}
+	while (!name.empty() && name.lastChar() == '-')
+		name.deleteLastChar();
+	return ConfMan.getActiveDomainName() + ".bitmap-" + name + ".bmp";
+}
+
+// Of two variable references, returns the bitmap variable and the other variable
+void sortBitmapVars(const VarReference &a, const VarReference &b, BitmapVariableModifier *&outBitmapVar, VariableModifier *&outOtherVar) {
+	outBitmapVar = BitmapVariableModifier::resolve(a);
+	Common::SharedPtr<Modifier> other = b.resolution.lock();
+	if (!outBitmapVar) {
+		outBitmapVar = BitmapVariableModifier::resolve(b);
+		other = a.resolution.lock();
+	}
+	outOtherVar = (other && other->isVariable()) ? static_cast<VariableModifier *>(other.get()) : nullptr;
+}
+
+bool getPathFromVar(VariableModifier *var, Common::String &outPath) {
+	if (!var)
+		return false;
+	DynamicValue value;
+	var->varGetValue(value);
+	if (value.getType() != DynamicValueTypes::kString)
+		return false;
+	outPath = value.getString();
+	return !outPath.empty();
+}
+
+} // End of anonymous namespace
+
 ImportBitmapModifier::ImportBitmapModifier() {
 }
 
@@ -228,18 +282,64 @@ ImportBitmapModifier::~ImportBitmapModifier() {
 }
 
 bool ImportBitmapModifier::load(const PlugInModifierLoaderContext &context, const Data::Hoologic::ImportBitmapModifier &data) {
+	// The two booleans are unknown. One variable is the bitmap, the other one holds the file path.
+	if (data.unknown1Event.type != Data::PlugInTypeTaggedValue::kEvent || !_when.load(data.unknown1Event.value.asEvent))
+		return false;
+	if (data.unknown4VarRef.type == Data::PlugInTypeTaggedValue::kVariableReference)
+		_var1 = VarReference(data.unknown4VarRef.value.asVarRefGUID, "");
+	if (data.unknown5VarRef.type == Data::PlugInTypeTaggedValue::kVariableReference)
+		_var2 = VarReference(data.unknown5VarRef.value.asVarRefGUID, "");
 	return true;
 }
 
 bool ImportBitmapModifier::respondsToEvent(const Event &evt) const {
-	return false;
+	return _when.respondsTo(evt);
 }
 
 VThreadState ImportBitmapModifier::consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
+	if (!_when.respondsTo(msg->getEvent()))
+		return kVThreadReturn;
+
+	BitmapVariableModifier *bitmapVar = nullptr;
+	VariableModifier *pathVar = nullptr;
+	sortBitmapVars(_var1, _var2, bitmapVar, pathVar);
+	Common::String path;
+	if (!bitmapVar || !getPathFromVar(pathVar, path)) {
+		warning("Import Bitmap modifier couldn't resolve its variables");
+		return kVThreadReturn;
+	}
+
+	Common::SharedPtr<Window> window = runtime->getMainWindow().lock();
+	Common::ScopedPtr<Common::InSaveFile> file(g_system->getSavefileManager()->openForLoading(bitmapFileName(path)));
+	Image::BitmapDecoder decoder;
+	if (!window || !file || !decoder.loadStream(*file)) {
+		warning("Import Bitmap modifier couldn't load '%s'", path.c_str());
+		return kVThreadReturn;
+	}
+
+	const Graphics::PixelFormat &format = window->getSurface()->format;
+	Common::SharedPtr<Graphics::ManagedSurface> bitmap(new Graphics::ManagedSurface());
+	Graphics::Surface *converted = decoder.getSurface()->convertTo(format, decoder.getPalette().data(), decoder.getPalette().size());
+	bitmap->copyFrom(*converted);
+	converted->free();
+	delete converted;
+	bitmapVar->setBitmap(bitmap);
+	runtime->setSceneGraphDirty();
+
 	return kVThreadReturn;
 }
 
 void ImportBitmapModifier::disable(Runtime *runtime) {
+}
+
+void ImportBitmapModifier::linkInternalReferences(ObjectLinkingScope *scope) {
+	_var1.linkInternalReferences(scope);
+	_var2.linkInternalReferences(scope);
+}
+
+void ImportBitmapModifier::visitInternalReferences(IStructuralReferenceVisitor *visitor) {
+	_var1.visitInternalReferences(visitor);
+	_var2.visitInternalReferences(visitor);
 }
 
 #ifdef MTROPOLIS_DEBUG_ENABLE
@@ -421,18 +521,58 @@ SaveBitmapModifier::~SaveBitmapModifier() {
 }
 
 bool SaveBitmapModifier::load(const PlugInModifierLoaderContext &context, const Data::Hoologic::SaveBitmapModifier &data) {
+	// The two booleans are unknown. One variable is the bitmap, the other one holds the file path.
+	if (data.unknown1Event.type != Data::PlugInTypeTaggedValue::kEvent || !_when.load(data.unknown1Event.value.asEvent))
+		return false;
+	if (data.unknown2VarRef.type == Data::PlugInTypeTaggedValue::kVariableReference)
+		_var1 = VarReference(data.unknown2VarRef.value.asVarRefGUID, "");
+	if (data.unknown5VarRef.type == Data::PlugInTypeTaggedValue::kVariableReference)
+		_var2 = VarReference(data.unknown5VarRef.value.asVarRefGUID, "");
 	return true;
 }
 
 bool SaveBitmapModifier::respondsToEvent(const Event &evt) const {
-	return false;
+	return _when.respondsTo(evt);
 }
 
 VThreadState SaveBitmapModifier::consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
+	if (!_when.respondsTo(msg->getEvent()))
+		return kVThreadReturn;
+
+	BitmapVariableModifier *bitmapVar = nullptr;
+	VariableModifier *pathVar = nullptr;
+	sortBitmapVars(_var1, _var2, bitmapVar, pathVar);
+	Common::String path;
+	if (!bitmapVar || !getPathFromVar(pathVar, path)) {
+		warning("Save Bitmap modifier couldn't resolve its variables");
+		return kVThreadReturn;
+	}
+
+	const Common::SharedPtr<Graphics::ManagedSurface> &bitmap = bitmapVar->getBitmap();
+	if (!bitmap)
+		return kVThreadReturn;
+
+	Common::ScopedPtr<Common::OutSaveFile> file(g_system->getSavefileManager()->openForSaving(bitmapFileName(path), false));
+	if (!file || !Image::writeBMP(*file, bitmap->rawSurface())) {
+		warning("Save Bitmap modifier couldn't save '%s'", path.c_str());
+		return kVThreadReturn;
+	}
+	file->finalize();
+
 	return kVThreadReturn;
 }
 
 void SaveBitmapModifier::disable(Runtime *runtime) {
+}
+
+void SaveBitmapModifier::linkInternalReferences(ObjectLinkingScope *scope) {
+	_var1.linkInternalReferences(scope);
+	_var2.linkInternalReferences(scope);
+}
+
+void SaveBitmapModifier::visitInternalReferences(IStructuralReferenceVisitor *visitor) {
+	_var1.visitInternalReferences(visitor);
+	_var2.visitInternalReferences(visitor);
 }
 
 #ifdef MTROPOLIS_DEBUG_ENABLE

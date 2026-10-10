@@ -122,6 +122,9 @@ public:
 
 	void disable(Runtime *runtime) override;
 
+	void linkInternalReferences(ObjectLinkingScope *scope) override;
+	void visitInternalReferences(IStructuralReferenceVisitor *visitor) override;
+
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	const char *debugGetTypeName() const override { return "ImportBitmap Modifier"; }
 	void debugInspect(IDebugInspectionReport *report) const override;
@@ -130,6 +133,10 @@ public:
 private:
 	Common::SharedPtr<Modifier> shallowClone() const override;
 	const char *getDefaultName() const override;
+
+	Event _when;
+	VarReference _var1;
+	VarReference _var2;
 };
 
 class DisplayBitmapModifier : public Modifier {
@@ -206,6 +213,9 @@ public:
 
 	void disable(Runtime *runtime) override;
 
+	void linkInternalReferences(ObjectLinkingScope *scope) override;
+	void visitInternalReferences(IStructuralReferenceVisitor *visitor) override;
+
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	const char *debugGetTypeName() const override { return "SaveBitmap Modifier"; }
 	void debugInspect(IDebugInspectionReport *report) const override;
@@ -214,6 +224,10 @@ public:
 private:
 	Common::SharedPtr<Modifier> shallowClone() const override;
 	const char *getDefaultName() const override;
+
+	Event _when;
+	VarReference _var1;
+	VarReference _var2;
 };
 
 class PrintBitmapModifier : public Modifier {
