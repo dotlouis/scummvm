@@ -2905,6 +2905,11 @@ MiniscriptInstructionOutcome RuntimeObject::scriptSetKill(MiniscriptThread *thre
 }
 
 MiniscriptInstructionOutcome RuntimeObject::scriptSetParent(MiniscriptThread *thread, const DynamicValue &value) {
+	// Re-parenting to no object does nothing. Uncle Albert's Fabulous Voyage does this for notebook
+	// objects restored without a page, and relies on the rest of the script running.
+	if (value.getType() == DynamicValueTypes::kNull)
+		return kMiniscriptInstructionOutcomeContinue;
+
 	if (value.getType() != DynamicValueTypes::kObject) {
 		thread->error("Object couldn't be re-parented to a non-object");
 		return kMiniscriptInstructionOutcomeFailed;
