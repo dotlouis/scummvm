@@ -63,6 +63,10 @@ struct Hacks {
 	// changes, and expects them after the loop that clones them has ended.
 	bool deferParentChangesToEndOfNextFrame;
 
+	// Point lists restored from ScummVM saves get their X and Y swapped, like the variable files of the original
+	// player, because the game swaps them back after loading.
+	bool swapRestoredPointLists;
+
 	uint midiVolumeScale;	// 256 = 1.0
 
 	uint32 minTransitionDuration;

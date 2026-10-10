@@ -971,6 +971,20 @@ bool ListVariableModifier::isListVariable() const {
 	return true;
 }
 
+void ListVariableModifier::varSwapPointCoordinates() {
+	ListVariableStorage *storage = static_cast<ListVariableStorage *>(_storage.get());
+
+	if (storage->_list->getType() != DynamicValueTypes::kPoint)
+		return;
+
+	storage->_list = storage->_list->clone();
+	for (Common::Point &pt : storage->_list->getPoint()) {
+		int16 x = pt.x;
+		pt.x = pt.y;
+		pt.y = x;
+	}
+}
+
 bool ListVariableModifier::varSetValue(MiniscriptThread *thread, const DynamicValue &value) {
 	ListVariableStorage *storage = static_cast<ListVariableStorage *>(_storage.get());
 

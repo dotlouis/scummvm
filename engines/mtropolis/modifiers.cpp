@@ -71,6 +71,15 @@ bool CompoundVarLoader::readSave(Common::ReadStream *stream, uint32 saveFileVers
 	return true;
 }
 
+static void recursiveSwapPointCoordinates(Modifier *modifier) {
+	if (modifier->isCompoundVariable()) {
+		for (const Common::SharedPtr<Modifier> &child : modifier->getChildContainer()->getModifiers())
+			recursiveSwapPointCoordinates(child.get());
+	} else if (modifier->isVariable()) {
+		static_cast<VariableModifier *>(modifier)->varSwapPointCoordinates();
+	}
+}
+
 // Copies variable values from a variable loaded from an mTropolis variable file into a project variable
 static bool transferVariableState(Runtime *runtime, Modifier *dest, Modifier *src) {
 	if (dest->isCompoundVariable() && src->isCompoundVariable()) {
@@ -495,9 +504,13 @@ VThreadState SaveAndRestoreModifier::consumeMessage(Runtime *runtime, const Comm
 		bool succeeded = false;
 		if (isPrompt)
 			succeeded = runtime->getLoadProvider()->promptLoad(&loader);
-		else if (runtime->getLoadProvider()->namedSaveExists(_fileName))
+		else if (runtime->getLoadProvider()->namedSaveExists(_fileName)) {
 			succeeded = runtime->getLoadProvider()->namedLoad(&loader, _fileName);
-		else {
+
+			// The original stores points as Y, X in variable files and some games swap them back after loading
+			if (succeeded && runtime->getHacks().swapRestoredPointLists)
+				recursiveSwapPointCoordinates(static_cast<Modifier *>(obj));
+		} else {
 			// No save yet, use the file from the game directory if there is one
 			Common::SharedPtr<Modifier> fileVar = runtime->getProject()->loadVariableFile(_filePath, _fileName);
 			if (fileVar)

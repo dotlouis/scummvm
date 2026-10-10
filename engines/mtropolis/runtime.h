@@ -3169,6 +3169,9 @@ public:
 	virtual bool varSetValue(MiniscriptThread *thread, const DynamicValue &value) = 0;
 	virtual void varGetValue(DynamicValue &dest) const = 0;
 
+	// Swaps the X and Y coordinates of the points the variable holds, for game-specific save compatibility
+	virtual void varSwapPointCoordinates();
+
 	bool readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) override;
 
 	void disable(Runtime *runtime) override;

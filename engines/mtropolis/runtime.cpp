@@ -10630,6 +10630,9 @@ bool VariableModifier::readAttribute(MiniscriptThread *thread, DynamicValue &res
 void VariableModifier::disable(Runtime *runtime) {
 }
 
+void VariableModifier::varSwapPointCoordinates() {
+}
+
 DynamicValueWriteProxy VariableModifier::createWriteProxy() {
 	DynamicValueWriteProxy proxy;
 	proxy.pod.objectRef = this;

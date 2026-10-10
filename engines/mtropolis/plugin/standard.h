@@ -282,6 +282,7 @@ public:
 	void varGetValue(DynamicValue &dest) const override;
 
 	bool isListVariable() const override;
+	void varSwapPointCoordinates() override;
 
 	bool readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) override;
 	bool readAttributeIndexed(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib, const DynamicValue &index) override;
