@@ -3518,12 +3518,9 @@ bool Structural::readAttribute(MiniscriptThread *thread, DynamicValue &result, c
 	if (RuntimeObject::readAttribute(thread, result, attrib))
 		return true;
 
-	if (_sceneLoadState == Structural::SceneLoadState::kSceneNotLoaded) {
-#ifdef MTROPOLIS_DEBUG_ENABLE
-		if (Debugger *debugger = thread->getRuntime()->debugGetDebugger())
-			debugger->notify(kDebugSeverityError, "Hot-loading scenes is not yet implemented (readAttribute)");
-#endif
-	}
+	// Scripts can reach into scenes that were never loaded, e.g. to send messages to objects in a library scene
+	if (_sceneLoadState == Structural::SceneLoadState::kSceneNotLoaded)
+		thread->getRuntime()->hotLoadScene(this);
 
 	// Traverse children (modifiers must be first)
 	for (const Common::SharedPtr<Modifier> &modifier : _modifiers) {
@@ -3593,6 +3590,9 @@ MiniscriptInstructionOutcome Structural::writeRefAttribute(MiniscriptThread *thr
 		return kMiniscriptInstructionOutcomeContinue;
 	}
 
+	if (_sceneLoadState == Structural::SceneLoadState::kSceneNotLoaded)
+		thread->getRuntime()->hotLoadScene(this);
+
 	// Attempt to resolve as a child object
 	// Modifiers are first, then structural
 	for (const Common::SharedPtr<Modifier> &modifier : _modifiers) {
@@ -3614,12 +3614,8 @@ MiniscriptInstructionOutcome Structural::writeRefAttribute(MiniscriptThread *thr
 
 bool Structural::readAttributeIndexed(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib, const DynamicValue &index) {
 	if (attrib == "nthelement") {
-		if (_sceneLoadState == Structural::SceneLoadState::kSceneNotLoaded) {
-#ifdef MTROPOLIS_DEBUG_ENABLE
-			if (Debugger *debugger = thread->getRuntime()->debugGetDebugger())
-				debugger->notify(kDebugSeverityError, "Hot-loading scenes is not yet implemented (readAttributeIndexed)");
-#endif
-		}
+		if (_sceneLoadState == Structural::SceneLoadState::kSceneNotLoaded)
+			thread->getRuntime()->hotLoadScene(this);
 
 		DynamicValue indexConverted;
 		if (!index.convertToType(DynamicValueTypes::kInteger, indexConverted)) {
