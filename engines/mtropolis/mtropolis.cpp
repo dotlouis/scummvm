@@ -324,6 +324,8 @@ Common::Error MTropolisEngine::run() {
 
 			HackSuites::addObsidianImprovedWidescreen(*_gameDescription, _runtime->getHacks());
 		}
+	} else if (_gameDescription->gameID == GID_ALBERT2) {
+		_runtime->getHacks().deferParentChangesToEndOfNextFrame = true;
 	} else if (_gameDescription->gameID == GID_MTI) {
 		HackSuites::addMTIQuirks(*_gameDescription, _runtime->getHacks());
 	} else if (_gameDescription->gameID == GID_UNIT) {

@@ -46,6 +46,7 @@ Hacks::Hacks() {
 	mtiSceneReturnHack = false;
 	mtiHispaniolaDamagedStringHack = false;
 	ignoreSceneUnloads = false;
+	deferParentChangesToEndOfNextFrame = false;
 }
 
 Hacks::~Hacks() {

@@ -4667,6 +4667,9 @@ bool Runtime::runFrame() {
 	_realTime = timeMillis - _realTimeBase;
 	_playTime = timeMillis - _playTimeBase;
 
+	// With deferred parent changes, only the changes requested before this frame are made, at the end of it
+	size_t numDeferredParentChangesReady = _pendingParentChanges.size();
+
 	for (;;) {
 #ifdef MTROPOLIS_DEBUG_ENABLE
 		if (_debugger && _debugger->isPaused())
@@ -4813,7 +4816,7 @@ bool Runtime::runFrame() {
 		// - Parent Enabled -> Clone for each cloned object
 		// - Show for each cloned object that is visible
 		// - Hide -> Kill -> Parent Disabled for each killed object
-		if (_pendingParentChanges.size() > 0) {
+		if (_pendingParentChanges.size() > 0 && !_hacks.deferParentChangesToEndOfNextFrame) {
 			ObjectParentChange parentChange = _pendingParentChanges.remove_at(0);
 
 			RuntimeObject *obj = parentChange._object.lock().get();
@@ -5020,6 +5023,23 @@ bool Runtime::runFrame() {
 
 		if (_isQuitting)
 			return false;
+
+		if (numDeferredParentChangesReady > 0 && _pendingParentChanges.size() > 0) {
+			numDeferredParentChangesReady--;
+			ObjectParentChange parentChange = _pendingParentChanges.remove_at(0);
+
+			RuntimeObject *obj = parentChange._object.lock().get();
+			RuntimeObject *newParent = parentChange._newParent.lock().get();
+
+			if (obj) {
+				if (newParent)
+					executeChangeObjectParent(obj, newParent);
+				else
+					warning("Object re-parenting failed, the new parent was invalid!");
+			}
+
+			continue;
+		}
 
 		// Ran out of actions
 		break;

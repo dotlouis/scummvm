@@ -58,6 +58,11 @@ struct Hacks {
 
 	bool ignoreSceneUnloads;
 
+	// Parent changes requested during a frame are only made at the end of the next frame, once nothing else is
+	// pending. Uncle Albert's Fabulous Voyage counts the replies that cloned objects send when their parent
+	// changes, and expects them after the loop that clones them has ended.
+	bool deferParentChangesToEndOfNextFrame;
+
 	uint midiVolumeScale;	// 256 = 1.0
 
 	uint32 minTransitionDuration;
