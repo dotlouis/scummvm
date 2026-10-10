@@ -3116,6 +3116,7 @@ public:
 	void recursiveCollectObjectsMatchingCriteria(Common::Array<Common::WeakPtr<RuntimeObject> > &results, bool (*evalFunc)(void *userData, RuntimeObject *object), void *userData, bool onlyEnabled);
 
 	Structural *findStructuralOwner() const;
+	Modifier *findChildByName(const Common::String &name);
 
 	void setHooks(const Common::SharedPtr<ModifierHooks> &hooks);
 	const Common::SharedPtr<ModifierHooks> &getHooks() const;

@@ -10304,7 +10304,26 @@ bool Modifier::readAttribute(MiniscriptThread *thread, DynamicValue &result, con
 		return true;
 	}
 
+	// Modifiers that contain other modifiers (e.g. behaviors) expose them by name
+	if (Modifier *child = findChildByName(attrib)) {
+		result.setObject(child->getSelfReference());
+		return true;
+	}
+
 	return false;
+}
+
+Modifier *Modifier::findChildByName(const Common::String &name) {
+	IModifierContainer *container = getChildContainer();
+	if (!container)
+		return nullptr;
+
+	for (const Common::SharedPtr<Modifier> &child : container->getModifiers()) {
+		if (caseInsensitiveEqual(child->getName(), name))
+			return child.get();
+	}
+
+	return nullptr;
 }
 
 MiniscriptInstructionOutcome Modifier::writeRefAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib) {
@@ -10313,6 +10332,11 @@ MiniscriptInstructionOutcome Modifier::writeRefAttribute(MiniscriptThread *threa
 		return kMiniscriptInstructionOutcomeContinue;
 	} else if (attrib == "name") {
 		DynamicValueWriteStringHelper::create(&_name, writeProxy);
+		return kMiniscriptInstructionOutcomeContinue;
+	}
+
+	if (Modifier *child = findChildByName(attrib)) {
+		DynamicValueWriteObjectHelper::create(child, writeProxy);
 		return kMiniscriptInstructionOutcomeContinue;
 	}
 
