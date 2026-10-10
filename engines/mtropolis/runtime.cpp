@@ -3887,6 +3887,12 @@ CORO_BEGIN_DEFINITION(Structural::StructuralConsumeCommandCoroutine)
 			CORO_CALL(Runtime::SendMessageOnVThreadCoroutine, params->runtime, dispatch);
 
 			CORO_RETURN;
+		CORO_ELSE_IF(Event(EventIDs::kClone, 0).respondsTo(params->msg->getEvent()))
+			params->runtime->queueCloneObject(params->self->getSelfReference());
+			CORO_RETURN;
+		CORO_ELSE_IF(Event(EventIDs::kKill, 0).respondsTo(params->msg->getEvent()))
+			params->runtime->queueKillObject(params->self->getSelfReference());
+			CORO_RETURN;
 		CORO_ELSE_IF(params->msg->getEvent().eventType == EventIDs::kAttribSet)
 			locals->attribID = params->msg->getEvent().eventInfo;
 
