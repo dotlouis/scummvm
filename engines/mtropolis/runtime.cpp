@@ -7052,7 +7052,7 @@ void Runtime::checkCollisions(ICollider *optRestrictToCollider) {
 		for (size_t oldIndex = 0; oldIndex < oldCollidingElements.size();) {
 			Common::SharedPtr<VisualElement> oldColElement = oldCollidingElements[oldIndex].lock();
 			if (oldColElement.get() == nullptr) {
-				collidingElements.remove_at(oldIndex);
+				oldCollidingElements.remove_at(oldIndex);
 				continue;
 			}
 
