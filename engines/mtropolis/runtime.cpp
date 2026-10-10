@@ -2303,6 +2303,9 @@ void MessengerSendSpec::visitInternalReferences(IStructuralReferenceVisitor *vis
 	visitor->visitWeakModifierRef(_resolvedModifierDest);
 	visitor->visitWeakStructuralRef(_resolvedStructuralDest);
 	visitor->visitWeakModifierRef(_resolvedVarSource);
+
+	// The "with" value can reference a variable, which must follow the messenger when it's cloned
+	with.visitInternalReferences(visitor);
 }
 
 void MessengerSendSpec::resolveDestination(Runtime *runtime, Modifier *sender, RuntimeObject *triggerSource, Common::WeakPtr<Structural> &outStructuralDest, Common::WeakPtr<Modifier> &outModifierDest, RuntimeObject *customDestination) const {
