@@ -3876,6 +3876,7 @@ CORO_BEGIN_DEFINITION(Structural::StructuralConsumeCommandCoroutine)
 		DynamicValueWriteProxy writeProxy;
 		DynamicValue attribGetResult;
 		bool quietlyDiscard;
+		bool wasVisible;
 	};
 
 	CORO_BEGIN_FUNCTION
@@ -3926,7 +3927,17 @@ CORO_BEGIN_DEFINITION(Structural::StructuralConsumeCommandCoroutine)
 
 			CORO_AWAIT_MINISCRIPT(params->self->writeRefAttribute(locals->miniscriptThread.get(), locals->writeProxy, *locals->attribName));
 
+			locals->wasVisible = params->self->isElement() && static_cast<Element *>(params->self)->isVisual() && static_cast<VisualElement *>(params->self)->isVisible();
+
 			CORO_AWAIT_MINISCRIPT(locals->writeProxy.pod.ifc->write(locals->miniscriptThread.get(), params->msg->getValue(), locals->writeProxy.pod.objectRef, locals->writeProxy.pod.ptrOrOffset));
+
+			CORO_IF(params->runtime->getHacks().attribSetVisibleShowsAndHides && locals->attribID == AttributeIDs::kAttribVisible && params->self->isElement() && static_cast<Element *>(params->self)->isVisual()
+					&& static_cast<VisualElement *>(params->self)->isVisible() != locals->wasVisible)
+				Common::SharedPtr<MessageProperties> msgProps(new MessageProperties(Event(locals->wasVisible ? EventIDs::kElementHide : EventIDs::kElementShow, 0), DynamicValue(), params->self->getSelfReference()));
+				Common::SharedPtr<MessageDispatch> dispatch(new MessageDispatch(msgProps, params->self, false, true, false));
+
+				CORO_CALL(Runtime::SendMessageOnVThreadCoroutine, params->runtime, dispatch);
+			CORO_END_IF
 
 			CORO_RETURN;
 		CORO_ELSE_IF(params->msg->getEvent().eventType == EventIDs::kAttribGet)

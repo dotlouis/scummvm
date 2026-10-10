@@ -67,6 +67,10 @@ struct Hacks {
 	// player, because the game swaps them back after loading.
 	bool swapRestoredPointLists;
 
+	// A Set Attribute "visible" message that changes the visibility also sends the Show or Hide event.
+	// Uncle Albert's Fabulous Voyage restores some notebook objects this way and waits for their Show event.
+	bool attribSetVisibleShowsAndHides;
+
 	uint midiVolumeScale;	// 256 = 1.0
 
 	uint32 minTransitionDuration;

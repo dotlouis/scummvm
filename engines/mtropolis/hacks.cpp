@@ -48,6 +48,7 @@ Hacks::Hacks() {
 	ignoreSceneUnloads = false;
 	deferParentChangesToEndOfNextFrame = false;
 	swapRestoredPointLists = false;
+	attribSetVisibleShowsAndHides = false;
 }
 
 Hacks::~Hacks() {
