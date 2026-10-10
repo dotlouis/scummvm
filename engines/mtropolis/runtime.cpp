@@ -4589,7 +4589,7 @@ Runtime::Runtime(OSystem *system, Audio::Mixer *mixer, ISaveUIProvider *saveProv
 	_getSetAttribIDsToAttribName[AttributeIDs::kAttribVisible] = "visible";
 	_getSetAttribIDsToAttribName[AttributeIDs::kAttribLayer] = "layer";
 	_getSetAttribIDsToAttribName[AttributeIDs::kAttribPaused] = "paused";
-	_getSetAttribIDsToAttribName[AttributeIDs::kAttribVisible] = "loop";
+	_getSetAttribIDsToAttribName[AttributeIDs::kAttribLoop] = "loop";
 	_getSetAttribIDsToAttribName[AttributeIDs::kAttribPosition] = "position";
 	_getSetAttribIDsToAttribName[AttributeIDs::kAttribWidth] = "width";
 	_getSetAttribIDsToAttribName[AttributeIDs::kAttribHeight] = "height";
