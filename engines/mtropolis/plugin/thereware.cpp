@@ -52,10 +52,25 @@ bool RotatorModifier::readAttribute(MiniscriptThread *thread, DynamicValue &resu
 }
 
 bool RotatorModifier::respondsToEvent(const Event &evt) const {
-	return false;
+	return Event(EventIDs::kParentEnabled, 0).respondsTo(evt);
 }
 
 VThreadState RotatorModifier::consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
+	// Rotation isn't implemented. The rotator draws the image itself with its white background
+	// transparent, so at least draw the unrotated image that way.
+	if (Event(EventIDs::kParentEnabled, 0).respondsTo(msg->getEvent())) {
+		Structural *owner = findStructuralOwner();
+		if (owner && owner->isElement() && static_cast<Element *>(owner)->isVisual()) {
+			VisualElement *element = static_cast<VisualElement *>(owner);
+			VisualElementRenderProperties props = element->getRenderProperties();
+			if (props.getInkMode() == VisualElementRenderProperties::kInkModeDefault || props.getInkMode() == VisualElementRenderProperties::kInkModeCopy) {
+				props.setInkMode(VisualElementRenderProperties::kInkModeBackgroundTransparent);
+				props.setBackColor(ColorRGB8(255, 255, 255));
+				element->setRenderProperties(props, element->getPrimaryGraphicModifier());
+			}
+		}
+	}
+
 	return kVThreadReturn;
 }
 
