@@ -779,6 +779,21 @@ MiniscriptInstructionOutcome Modulo::arithExecute(MiniscriptThread *thread, doub
 	return kMiniscriptInstructionOutcomeContinue;
 }
 
+// Object reference variables evaluate to themselves so their attributes can be used, but comparisons
+// such as "objectref = null" are about the object they reference.
+static void resolveReferencedObject(MiniscriptThread *thread, DynamicValue &value) {
+	if (value.getType() != DynamicValueTypes::kObject)
+		return;
+
+	Common::SharedPtr<RuntimeObject> obj = value.getObject().object.lock();
+	if (!obj || !obj->isModifier() || !static_cast<Modifier *>(obj.get())->isVariable())
+		return;
+
+	DynamicValue referenced;
+	if (obj->readAttribute(thread, referenced, "object"))
+		value = referenced;
+}
+
 MiniscriptInstructionOutcome UnorderedCompareInstruction::execute(MiniscriptThread *thread) const {
 	if (thread->getStackSize() < 2) {
 		thread->error("Stack underflow");
@@ -795,6 +810,9 @@ MiniscriptInstructionOutcome UnorderedCompareInstruction::execute(MiniscriptThre
 
 	DynamicValue &rs = thread->getStackValueFromTop(0).value;
 	DynamicValue &lsDest = thread->getStackValueFromTop(1).value;
+
+	resolveReferencedObject(thread, rs);
+	resolveReferencedObject(thread, lsDest);
 
 	bool isEqual = false;
 	bool isUndefined = false;
