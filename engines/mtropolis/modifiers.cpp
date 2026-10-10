@@ -3675,11 +3675,34 @@ bool StringVariableModifier::load(ModifierLoaderContext &context, const Data::St
 }
 
 bool StringVariableModifier::varSetValue(MiniscriptThread *thread, const DynamicValue &value) {
-	DynamicValue stringValue;
-	if (!value.convertToType(DynamicValueTypes::kString, stringValue))
-		return false;
-
 	StringVariableStorage *storage = static_cast<StringVariableStorage *>(_storage.get());
+
+	DynamicValue derefValue = value.dereference();
+	if (derefValue.getType() == DynamicValueTypes::kObject) {
+		// An object is stored as its absolute path, which "object" resolves back
+		Common::SharedPtr<RuntimeObject> obj = derefValue.getObject().object.lock();
+		if (!obj)
+			return false;
+
+		Common::String path;
+		for (RuntimeObject *level = obj.get(); level;) {
+			if (level->isStructural()) {
+				path = "/" + static_cast<Structural *>(level)->getName() + path;
+				level = static_cast<Structural *>(level)->getParent();
+			} else if (level->isModifier()) {
+				path = "/" + static_cast<Modifier *>(level)->getName() + path;
+				level = static_cast<Modifier *>(level)->getParent().lock().get();
+			} else
+				return false;
+		}
+
+		storage->_value = path;
+		return true;
+	}
+
+	DynamicValue stringValue;
+	if (!derefValue.convertToType(DynamicValueTypes::kString, stringValue))
+		return false;
 
 	storage->_value = stringValue.getString();
 
@@ -3690,6 +3713,22 @@ void StringVariableModifier::varGetValue(DynamicValue &dest) const {
 	StringVariableStorage *storage = static_cast<StringVariableStorage *>(_storage.get());
 
 	dest.setString(storage->_value);
+}
+
+bool StringVariableModifier::readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) {
+	// A string holding an object path, such as the "path" of an object reference variable, resolves to that object
+	if (attrib == "object") {
+		StringVariableStorage *storage = static_cast<StringVariableStorage *>(_storage.get());
+
+		Common::SharedPtr<RuntimeObject> obj = thread->getRuntime()->resolveObjectPath(this, storage->_value).lock();
+		if (obj)
+			result.setObject(obj->getSelfReference());
+		else
+			result.clear();
+		return true;
+	}
+
+	return VariableModifier::readAttribute(thread, result, attrib);
 }
 
 #ifdef MTROPOLIS_DEBUG_ENABLE

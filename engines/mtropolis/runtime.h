@@ -1724,6 +1724,9 @@ public:
 
 	void hotLoadScene(Structural *structural);
 
+	// Resolves an mTropolis object path, either absolute ("/<project>/section/...") or relative to an object ("../name")
+	Common::WeakPtr<RuntimeObject> resolveObjectPath(RuntimeObject *origin, const Common::String &path);
+
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	void debugSetEnabled(bool enabled);
 	void debugBreak();

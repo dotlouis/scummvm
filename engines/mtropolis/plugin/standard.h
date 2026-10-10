@@ -203,8 +203,6 @@ private:
 	MiniscriptInstructionOutcome scriptObjectRefAttribIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib, const DynamicValue &index);
 
 	void resolve(Runtime *runtime);
-	void resolveRelativePath(Runtime *runtime, RuntimeObject *obj, const Common::String &path, size_t startPos);
-	void resolveAbsolutePath(Runtime *runtime);
 
 	static bool computeObjectPath(RuntimeObject *obj, Common::String &outPath);
 	static RuntimeObject *getObjectParent(RuntimeObject *obj);

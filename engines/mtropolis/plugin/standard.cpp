@@ -657,10 +657,8 @@ void ObjectReferenceVariableModifier::resolve(Runtime *runtime) {
 	if (storage->_objectPath.size() == 0)
 		return;
 
-	if (storage->_objectPath[0] == '/')
-		resolveAbsolutePath(runtime);
-	else if (storage->_objectPath[0] == '.')
-		resolveRelativePath(runtime, this, storage->_objectPath, 0);
+	if (storage->_objectPath[0] == '/' || storage->_objectPath[0] == '.')
+		storage->_object.object = runtime->resolveObjectPath(this, storage->_objectPath);
 	else
 		warning("Object reference variable had an unknown path format");
 
@@ -669,134 +667,6 @@ void ObjectReferenceVariableModifier::resolve(Runtime *runtime) {
 			storage->_object.reset();
 		}
 	}
-}
-
-void ObjectReferenceVariableModifier::resolveRelativePath(Runtime *runtime, RuntimeObject *obj, const Common::String &path, size_t startPos) {
-	ObjectReferenceVariableStorage *storage = static_cast<ObjectReferenceVariableStorage *>(_storage.get());
-
-	bool haveNextLevel = true;
-	size_t nextLevelPos = startPos;
-
-	while (haveNextLevel) {
-		startPos = nextLevelPos;
-		size_t endPos = path.find('/', startPos);
-		if (endPos == Common::String::npos) {
-			haveNextLevel = false;
-			endPos = path.size();
-		} else {
-			nextLevelPos = endPos + 1;
-		}
-
-		Common::String levelName = path.substr(startPos, endPos - startPos);
-
-		// This is technically more forgiving than mTropolis, which only allows ".." chains at the start of the path
-		// Adjust this if it turns out to be a problem...
-		if (levelName == "..") {
-			obj = getObjectParent(obj);
-			if (obj == nullptr)
-				return;
-
-			continue;
-		}
-
-		const Common::Array<Common::SharedPtr<Modifier> > *modifierChildren = nullptr;
-		const Common::Array<Common::SharedPtr<Structural> > *structuralChildren = nullptr;
-
-		if (obj->isStructural()) {
-			Structural *structural = static_cast<Structural *>(obj);
-
-			if (structural->getSceneLoadState() == Structural::SceneLoadState::kSceneNotLoaded)
-				runtime->hotLoadScene(structural);
-
-			modifierChildren = &structural->getModifiers();
-			structuralChildren = &structural->getChildren();
-		} else if (obj->isModifier()) {
-			Modifier *modifier = static_cast<Modifier *>(obj);
-			IModifierContainer *childContainer = modifier->getChildContainer();
-			if (childContainer)
-				modifierChildren = &childContainer->getModifiers();
-		}
-
-		bool foundMatch = false;
-		if (modifierChildren) {
-			for (const Common::SharedPtr<Modifier> &modifier : *modifierChildren) {
-				if (caseInsensitiveEqual(levelName, modifier->getName())) {
-					foundMatch = true;
-					obj = modifier.get();
-					break;
-				}
-			}
-		}
-		if (structuralChildren && !foundMatch) {
-			for (const Common::SharedPtr<Structural> &structural : *structuralChildren) {
-				if (caseInsensitiveEqual(levelName, structural->getName())) {
-					foundMatch = true;
-					obj = structural.get();
-					break;
-				}
-			}
-		}
-
-		if (!foundMatch)
-			return;
-	}
-
-	storage->_object.object = obj->getSelfReference();
-}
-
-void ObjectReferenceVariableModifier::resolveAbsolutePath(Runtime *runtime) {
-	ObjectReferenceVariableStorage *storage = static_cast<ObjectReferenceVariableStorage *>(_storage.get());
-
-	assert(storage->_objectPath[0] == '/');
-
-	RuntimeObject *project = this;
-	for (;;) {
-		RuntimeObject *parent = getObjectParent(project);
-		if (!parent)
-			break;
-		project = parent;
-	}
-
-	if (!project->isProject())
-		return; // Some sort of detached object
-
-	size_t prefixEnd = 0;
-
-	bool foundPrefix = false;
-
-	if (runtime->getHacks().ignoreMismatchedProjectNameInObjectLookups) {
-		size_t slashOffset = storage->_objectPath.findFirstOf('/', 1);
-		if (slashOffset != Common::String::npos) {
-			prefixEnd = slashOffset;
-			foundPrefix = true;
-		}
-	} else {
-		Common::String projectPrefixes[2] = {
-			"/" + static_cast<Structural *>(project)->getName(),
-			"/<project>"};
-
-		for (const Common::String &prefix : projectPrefixes) {
-			if (storage->_objectPath.size() >= prefix.size() && caseInsensitiveEqual(storage->_objectPath.substr(0, prefix.size()), prefix)) {
-				prefixEnd = prefix.size();
-				foundPrefix = true;
-				break;
-			}
-		}
-	}
-
-	if (!foundPrefix)
-		return;
-
-	// If the object path is longer, then there must be a slash separator, otherwise this doesn't match the project
-	if (prefixEnd == storage->_objectPath.size()) {
-		storage->_object = ObjectReference(project->getSelfReference());
-		return;
-	}
-
-	if (storage->_objectPath[prefixEnd] != '/')
-		return;
-
-	return resolveRelativePath(runtime, project, storage->_objectPath, prefixEnd + 1);
 }
 
 bool ObjectReferenceVariableModifier::computeObjectPath(RuntimeObject *obj, Common::String &outPath) {

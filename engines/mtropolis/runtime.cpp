@@ -7349,6 +7349,140 @@ void Runtime::queueChangeObjectParent(const Common::WeakPtr<RuntimeObject> &obj,
 	_pendingParentChanges.push_back(ObjectParentChange(obj, newParent));
 }
 
+static RuntimeObject *getRuntimeObjectParent(RuntimeObject *obj) {
+	if (obj->isStructural())
+		return static_cast<Structural *>(obj)->getParent();
+	if (obj->isModifier())
+		return static_cast<Modifier *>(obj)->getParent().lock().get();
+	return nullptr;
+}
+
+static Common::WeakPtr<RuntimeObject> resolveRelativeObjectPath(Runtime *runtime, RuntimeObject *obj, const Common::String &path, size_t startPos) {
+	bool haveNextLevel = true;
+	size_t nextLevelPos = startPos;
+
+	while (haveNextLevel) {
+		startPos = nextLevelPos;
+		size_t endPos = path.find('/', startPos);
+		if (endPos == Common::String::npos) {
+			haveNextLevel = false;
+			endPos = path.size();
+		} else {
+			nextLevelPos = endPos + 1;
+		}
+
+		Common::String levelName = path.substr(startPos, endPos - startPos);
+
+		// This is technically more forgiving than mTropolis, which only allows ".." chains at the start of the path
+		if (levelName == "..") {
+			obj = getRuntimeObjectParent(obj);
+			if (obj == nullptr)
+				return Common::WeakPtr<RuntimeObject>();
+
+			continue;
+		}
+
+		const Common::Array<Common::SharedPtr<Modifier> > *modifierChildren = nullptr;
+		const Common::Array<Common::SharedPtr<Structural> > *structuralChildren = nullptr;
+
+		if (obj->isStructural()) {
+			Structural *structural = static_cast<Structural *>(obj);
+
+			if (structural->getSceneLoadState() == Structural::SceneLoadState::kSceneNotLoaded)
+				runtime->hotLoadScene(structural);
+
+			modifierChildren = &structural->getModifiers();
+			structuralChildren = &structural->getChildren();
+		} else if (obj->isModifier()) {
+			IModifierContainer *childContainer = static_cast<Modifier *>(obj)->getChildContainer();
+			if (childContainer)
+				modifierChildren = &childContainer->getModifiers();
+		}
+
+		bool foundMatch = false;
+		if (modifierChildren) {
+			for (const Common::SharedPtr<Modifier> &modifier : *modifierChildren) {
+				if (caseInsensitiveEqual(levelName, modifier->getName())) {
+					foundMatch = true;
+					obj = modifier.get();
+					break;
+				}
+			}
+		}
+		if (structuralChildren && !foundMatch) {
+			for (const Common::SharedPtr<Structural> &structural : *structuralChildren) {
+				if (caseInsensitiveEqual(levelName, structural->getName())) {
+					foundMatch = true;
+					obj = structural.get();
+					break;
+				}
+			}
+		}
+
+		if (!foundMatch)
+			return Common::WeakPtr<RuntimeObject>();
+	}
+
+	return obj->getSelfReference();
+}
+
+Common::WeakPtr<RuntimeObject> Runtime::resolveObjectPath(RuntimeObject *origin, const Common::String &path) {
+	if (path.empty())
+		return Common::WeakPtr<RuntimeObject>();
+
+	if (path[0] == '.')
+		return resolveRelativeObjectPath(this, origin, path, 0);
+
+	if (path[0] != '/')
+		return Common::WeakPtr<RuntimeObject>();
+
+	RuntimeObject *project = origin;
+	for (;;) {
+		RuntimeObject *parent = getRuntimeObjectParent(project);
+		if (!parent)
+			break;
+		project = parent;
+	}
+
+	if (!project->isProject())
+		return Common::WeakPtr<RuntimeObject>(); // Some sort of detached object
+
+	size_t prefixEnd = 0;
+	bool foundPrefix = false;
+
+	if (_hacks.ignoreMismatchedProjectNameInObjectLookups) {
+		size_t slashOffset = path.findFirstOf('/', 1);
+		if (slashOffset != Common::String::npos) {
+			prefixEnd = slashOffset;
+			foundPrefix = true;
+		}
+	} else {
+		Common::String projectPrefixes[2] = {
+			"/" + static_cast<Structural *>(project)->getName(),
+			"/<project>"};
+
+		for (const Common::String &prefix : projectPrefixes) {
+			if (path.size() >= prefix.size() && caseInsensitiveEqual(path.substr(0, prefix.size()), prefix)) {
+				prefixEnd = prefix.size();
+				foundPrefix = true;
+				break;
+			}
+		}
+	}
+
+	if (!foundPrefix)
+		return Common::WeakPtr<RuntimeObject>();
+
+	// If the object path is longer, then there must be a slash separator, otherwise this doesn't match the project
+	if (prefixEnd == path.size())
+		return project->getSelfReference();
+
+	if (path[prefixEnd] != '/')
+		return Common::WeakPtr<RuntimeObject>();
+
+	return resolveRelativeObjectPath(this, project, path, prefixEnd + 1);
+}
+
 void Runtime::hotLoadScene(Structural *structural) {
 	assert(structural->getSceneLoadState() != Structural::SceneLoadState::kNotAScene);
 	loadScene(structural->getSelfReference().lock().staticCast<Structural>());

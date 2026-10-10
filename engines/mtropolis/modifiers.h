@@ -1459,6 +1459,8 @@ public:
 	bool varSetValue(MiniscriptThread *thread, const DynamicValue &value) override;
 	void varGetValue(DynamicValue &dest) const override;
 
+	bool readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) override;
+
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	const char *debugGetTypeName() const override { return "String Variable Modifier"; }
 	SupportStatus debugGetSupportStatus() const override { return kSupportStatusDone; }
