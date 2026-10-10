@@ -50,8 +50,7 @@ void RotatorModifier::initSize() {
 }
 
 bool RotatorModifier::readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) {
-	// Rotation isn't implemented, the size is only stored. It starts as the size of the element,
-	// which is what an unrotated image has.
+	// The size is only stored. It starts as the size of the element, which is what an unrotated image has.
 	if (attrib == "size") {
 		initSize();
 		result.setPoint(Common::Point(_sizeX, _sizeY));
@@ -59,6 +58,10 @@ bool RotatorModifier::readAttribute(MiniscriptThread *thread, DynamicValue &resu
 	}
 	if (attrib == "angle") {
 		result.setFloat(_angle);
+		return true;
+	}
+	if (attrib == "axisoffset") {
+		result.setPoint(_axisOffset);
 		return true;
 	}
 
@@ -72,11 +75,73 @@ MiniscriptInstructionOutcome RotatorModifier::writeRefAttribute(MiniscriptThread
 		return kMiniscriptInstructionOutcomeContinue;
 	}
 	if (attrib == "angle") {
-		DynamicValueWriteFloatHelper<double>::create(&_angle, result);
+		DynamicValueWriteFuncHelper<RotatorModifier, &RotatorModifier::scriptSetAngle, true>::create(this, result);
+		return kMiniscriptInstructionOutcomeContinue;
+	}
+	if (attrib == "axisoffset") {
+		DynamicValueWriteOrRefAttribFuncHelper<RotatorModifier, &RotatorModifier::scriptSetAxisOffset, &RotatorModifier::scriptWriteRefAxisOffsetAttribute>::create(this, result);
 		return kMiniscriptInstructionOutcomeContinue;
 	}
 
 	return Modifier::writeRefAttribute(thread, result, attrib);
+}
+
+MiniscriptInstructionOutcome RotatorModifier::scriptSetAngle(MiniscriptThread *thread, const DynamicValue &value) {
+	DynamicValue converted;
+	if (!value.convertToType(DynamicValueTypes::kFloat, converted))
+		return kMiniscriptInstructionOutcomeFailed;
+
+	_angle = converted.getFloat();
+	updateOwnerRotation();
+	return kMiniscriptInstructionOutcomeContinue;
+}
+
+MiniscriptInstructionOutcome RotatorModifier::scriptSetAxisOffset(MiniscriptThread *thread, const DynamicValue &value) {
+	if (value.getType() != DynamicValueTypes::kPoint)
+		return kMiniscriptInstructionOutcomeFailed;
+
+	_axisOffset = value.getPoint();
+	updateOwnerRotation();
+	return kMiniscriptInstructionOutcomeContinue;
+}
+
+MiniscriptInstructionOutcome RotatorModifier::scriptSetAxisOffsetX(MiniscriptThread *thread, const DynamicValue &value) {
+	DynamicValue converted;
+	if (!value.convertToType(DynamicValueTypes::kInteger, converted))
+		return kMiniscriptInstructionOutcomeFailed;
+
+	_axisOffset.x = converted.getInt();
+	updateOwnerRotation();
+	return kMiniscriptInstructionOutcomeContinue;
+}
+
+MiniscriptInstructionOutcome RotatorModifier::scriptSetAxisOffsetY(MiniscriptThread *thread, const DynamicValue &value) {
+	DynamicValue converted;
+	if (!value.convertToType(DynamicValueTypes::kInteger, converted))
+		return kMiniscriptInstructionOutcomeFailed;
+
+	_axisOffset.y = converted.getInt();
+	updateOwnerRotation();
+	return kMiniscriptInstructionOutcomeContinue;
+}
+
+MiniscriptInstructionOutcome RotatorModifier::scriptWriteRefAxisOffsetAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib) {
+	if (attrib == "x") {
+		DynamicValueWriteFuncHelper<RotatorModifier, &RotatorModifier::scriptSetAxisOffsetX, true>::create(this, proxy);
+		return kMiniscriptInstructionOutcomeContinue;
+	}
+	if (attrib == "y") {
+		DynamicValueWriteFuncHelper<RotatorModifier, &RotatorModifier::scriptSetAxisOffsetY, true>::create(this, proxy);
+		return kMiniscriptInstructionOutcomeContinue;
+	}
+
+	return kMiniscriptInstructionOutcomeFailed;
+}
+
+void RotatorModifier::updateOwnerRotation() {
+	Structural *owner = findStructuralOwner();
+	if (owner && owner->isElement() && static_cast<Element *>(owner)->isVisual())
+		static_cast<VisualElement *>(owner)->setRotation(_angle, _axisOffset);
 }
 
 MiniscriptInstructionOutcome RotatorModifier::scriptSetSize(MiniscriptThread *thread, const DynamicValue &value) {
@@ -106,9 +171,10 @@ bool RotatorModifier::respondsToEvent(const Event &evt) const {
 }
 
 VThreadState RotatorModifier::consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
-	// Rotation isn't implemented. The rotator draws the image itself with its white background
-	// transparent, so at least draw the unrotated image that way.
+	// The rotator draws the image itself with its white background transparent
 	if (Event(EventIDs::kParentEnabled, 0).respondsTo(msg->getEvent())) {
+		updateOwnerRotation();
+
 		Structural *owner = findStructuralOwner();
 		if (owner && owner->isElement() && static_cast<Element *>(owner)->isVisual()) {
 			VisualElement *element = static_cast<VisualElement *>(owner);

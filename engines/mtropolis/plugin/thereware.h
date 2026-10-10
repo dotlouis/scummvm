@@ -101,15 +101,22 @@ private:
 
 	MiniscriptInstructionOutcome scriptSetSize(MiniscriptThread *thread, const DynamicValue &value);
 	MiniscriptInstructionOutcome scriptWriteRefSizeAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib);
+	MiniscriptInstructionOutcome scriptSetAngle(MiniscriptThread *thread, const DynamicValue &value);
+	MiniscriptInstructionOutcome scriptSetAxisOffset(MiniscriptThread *thread, const DynamicValue &value);
+	MiniscriptInstructionOutcome scriptSetAxisOffsetX(MiniscriptThread *thread, const DynamicValue &value);
+	MiniscriptInstructionOutcome scriptSetAxisOffsetY(MiniscriptThread *thread, const DynamicValue &value);
+	MiniscriptInstructionOutcome scriptWriteRefAxisOffsetAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib);
 	void initSize();
+	void updateOwnerRotation();
 
 	// Size of the rotated image, starts as the size of the element
 	bool _haveSize;
 	int32 _sizeX;
 	int32 _sizeY;
 
-	// Rotation angle in degrees
+	// Rotation angle in degrees, and offset of the rotation axis from the element center
 	double _angle;
+	Common::Point _axisOffset;
 };
 
 class TrackerModifier : public Modifier {

@@ -32,6 +32,8 @@
 #include "graphics/managed_surface.h"
 #include "graphics/paletteman.h"
 #include "graphics/surface.h"
+#include "graphics/transform_struct.h"
+#include "graphics/transform_tools.h"
 #include "graphics/wincursor.h"
 #include "graphics/maccursor.h"
 #include "graphics/macgui/macfontmanager.h"
@@ -9317,7 +9319,8 @@ VisualElementRenderProperties &VisualElementRenderProperties::operator=(const Vi
 
 VisualElement::VisualElement()
 	: _rect(0, 0, 0, 0), _cachedAbsoluteOrigin(Common::Point(0, 0)), _contentsDirty(true), _directToScreen(false), _visible(false), _visibleByDefault(true), _layer(0),
-	  _topLeftBevelShading(0), _bottomRightBevelShading(0), _interiorShading(0), _bevelSize(0) {
+	  _topLeftBevelShading(0), _bottomRightBevelShading(0), _interiorShading(0), _bevelSize(0),
+	  _hasRotation(false), _rotationAngle(0.0), _rotationCacheKey(0), _rotationCacheAngle(0.0), _rotationCacheSource(nullptr), _rotationCacheTransColor(0) {
 }
 
 VisualElement::VisualElement(const VisualElement &other)
@@ -9325,7 +9328,8 @@ VisualElement::VisualElement(const VisualElement &other)
 	, _rect(other._rect), _cachedAbsoluteOrigin(other._cachedAbsoluteOrigin), _layer(other._layer), _topLeftBevelShading(other._topLeftBevelShading)
 	, _bottomRightBevelShading(other._bottomRightBevelShading), _interiorShading(other._interiorShading), _bevelSize(other._bevelSize)
 	, _dragProps(nullptr), _renderProps(other._renderProps), _primaryGraphicModifier(nullptr), _transitionProps(other._transitionProps)
-	, _palette(other._palette), _prevRect(other._prevRect), _contentsDirty(true) {
+	, _palette(other._palette), _prevRect(other._prevRect), _contentsDirty(true)
+	, _hasRotation(other._hasRotation), _rotationAngle(other._rotationAngle), _rotationAxisOffset(other._rotationAxisOffset), _rotationCacheKey(0), _rotationCacheAngle(0.0), _rotationCacheSource(nullptr), _rotationCacheTransColor(0) {
 }
 
 bool VisualElement::isVisual() const {
@@ -9800,6 +9804,93 @@ void VisualElement::setDisplayBitmapSource(const Common::WeakPtr<RuntimeObject> 
 
 bool VisualElement::hasDisplayBitmapSource() const {
 	return !_displayBitmapSource.expired();
+}
+
+void VisualElement::setRotation(double angle, const Common::Point &axisOffset) {
+	if (!_hasRotation) {
+		_hasRotation = true;
+		_contentsDirty = true;
+	}
+
+	if (angle != _rotationAngle || axisOffset != _rotationAxisOffset) {
+		_rotationAngle = angle;
+		_rotationAxisOffset = axisOffset;
+		_contentsDirty = true;
+	}
+}
+
+bool VisualElement::hasRotation() const {
+	return _hasRotation;
+}
+
+bool VisualElement::renderRotated(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey) {
+	int32 angle = static_cast<int32>(floor(_rotationAngle + 0.5)) % 360;
+	if (angle < 0)
+		angle += 360;
+	if (angle == 0)
+		return false;
+
+	Graphics::ManagedSurface *dest = window->getSurface().get();
+	const Common::Point elementOrigin = _cachedAbsoluteOrigin;
+	const Common::Point pivot(elementOrigin.x + _rect.width() / 2 + _rotationAxisOffset.x, elementOrigin.y + _rect.height() / 2 + _rotationAxisOffset.y);
+	const uint32 keyColor = dest->format.ARGBToColor(255, 255, 1, 254);
+
+	if (!_rotationCache || _rotationCacheKey != cacheKey || _rotationCacheAngle != _rotationAngle || _rotationCacheAxisOffset != _rotationAxisOffset
+		|| _rotationCacheSource != &src || _rotationCacheTransColor != transColor || _rotationCache->format != dest->format) {
+		// Convert to ARGB with the transparent color as alpha, rotate around the pivot, then convert to the window format with a key color
+		const Graphics::PixelFormat argbFormat(4, 8, 8, 8, 8, 16, 8, 0, 24);
+		Graphics::Surface argb;
+		argb.create(srcRect.width(), srcRect.height(), argbFormat);
+		for (int y = 0; y < srcRect.height(); y++) {
+			for (int x = 0; x < srcRect.width(); x++) {
+				uint32 raw = src.getPixel(srcRect.left + x, srcRect.top + y);
+				uint32 color = 0;
+				if (!hasTransColor || raw != transColor) {
+					uint8 r, g, b;
+					if (src.format.bytesPerPixel == 1) {
+						r = palette[raw * 3 + 0];
+						g = palette[raw * 3 + 1];
+						b = palette[raw * 3 + 2];
+					} else {
+						uint8 a;
+						src.format.colorToARGB(raw, a, r, g, b);
+					}
+					color = argbFormat.ARGBToColor(255, r, g, b);
+				}
+				argb.setPixel(x, y, color);
+			}
+		}
+
+		const Common::Point pivotInSource(pivot.x - destOrigin.x, pivot.y - destOrigin.y);
+		Graphics::TransformStruct transform(100, 100, static_cast<uint32>(angle), pivotInSource.x, pivotInSource.y);
+		Common::Point rotatedPivot;
+		Graphics::TransformTools::newRect(Common::Rect(srcRect.width(), srcRect.height()), transform, &rotatedPivot);
+		Graphics::Surface *rotated = argb.rotoscale(transform, false);
+		argb.free();
+
+		Common::SharedPtr<Graphics::ManagedSurface> converted(new Graphics::ManagedSurface(rotated->w, rotated->h, dest->format));
+		for (int y = 0; y < rotated->h; y++) {
+			for (int x = 0; x < rotated->w; x++) {
+				uint8 a, r, g, b;
+				argbFormat.colorToARGB(rotated->getPixel(x, y), a, r, g, b);
+				converted->setPixel(x, y, a >= 128 ? dest->format.ARGBToColor(255, r, g, b) : keyColor);
+			}
+		}
+		rotated->free();
+		delete rotated;
+
+		_rotationCache = converted;
+		_rotationCacheOffset = Common::Point(-rotatedPivot.x, -rotatedPivot.y);
+		_rotationCacheKey = cacheKey;
+		_rotationCacheAngle = _rotationAngle;
+		_rotationCacheAxisOffset = _rotationAxisOffset;
+		_rotationCacheSource = &src;
+		_rotationCacheTransColor = transColor;
+	}
+
+	const Common::Point topLeft(pivot.x + _rotationCacheOffset.x, pivot.y + _rotationCacheOffset.y);
+	dest->transBlitFrom(*_rotationCache, Common::Rect(_rotationCache->w, _rotationCache->h), Common::Rect(topLeft.x, topLeft.y, topLeft.x + _rotationCache->w, topLeft.y + _rotationCache->h), keyColor);
+	return true;
 }
 
 bool VisualElement::renderDisplayBitmap(Window *window) {

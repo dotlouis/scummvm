@@ -2926,6 +2926,11 @@ public:
 	void setDisplayBitmapSource(const Common::WeakPtr<RuntimeObject> &source);
 	bool hasDisplayBitmapSource() const;
 
+	// Rotation set by a rotation plug-in (Thereware Rotator): the contents are drawn rotated by angle degrees
+	// around the element center moved by axisOffset.
+	void setRotation(double angle, const Common::Point &axisOffset);
+	bool hasRotation() const;
+
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	void debugInspect(IDebugInspectionReport *report) const override;
 #endif
@@ -2935,6 +2940,11 @@ protected:
 
 	// Draws the display bitmap if a source is set, returns false if the element should render its own contents
 	bool renderDisplayBitmap(Window *window);
+
+	// Draws srcRect of src rotated, if the element is rotated, and returns true; returns false if it isn't rotated.
+	// destOrigin is where the top-left of srcRect goes without rotation. Pixels equal to transColor are
+	// transparent if hasTransColor. palette is used for 8-bit sources. cacheKey identifies the source contents.
+	bool renderRotated(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey);
 
 	// Write proxy for "asset", which only accepts the "preload" hint
 	struct AssetWriteProxyInterface {
@@ -3023,6 +3033,17 @@ protected:
 	bool _contentsDirty;
 
 	Common::WeakPtr<RuntimeObject> _displayBitmapSource;
+
+	bool _hasRotation;
+	double _rotationAngle;
+	Common::Point _rotationAxisOffset;
+	Common::SharedPtr<Graphics::ManagedSurface> _rotationCache;	// Rotated contents in the window format, keyed by _rotationCacheKey
+	Common::Point _rotationCacheOffset;	// Position of the cached surface relative to the rotation pivot
+	uint32 _rotationCacheKey;
+	double _rotationCacheAngle;
+	Common::Point _rotationCacheAxisOffset;
+	const void *_rotationCacheSource;
+	uint32 _rotationCacheTransColor;
 };
 
 class NonVisualElement : public Element {

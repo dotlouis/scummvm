@@ -1292,6 +1292,15 @@ void ImageElement::render(Window *window) {
 		Common::Rect srcRect(optimized->w, optimized->h);
 		Common::Rect destRect(_cachedAbsoluteOrigin.x, _cachedAbsoluteOrigin.y, _cachedAbsoluteOrigin.x + _rect.width(), _cachedAbsoluteOrigin.y + _rect.height());
 
+		// A rotated image keeps its size, centered in the element, which is as large as its rotated bounds
+		if (hasRotation()) {
+			destRect.left = _cachedAbsoluteOrigin.x + (_rect.width() - optimized->w) / 2;
+			destRect.top = _cachedAbsoluteOrigin.y + (_rect.height() - optimized->h) / 2;
+			destRect.right = destRect.left + optimized->w;
+			destRect.bottom = destRect.top + optimized->h;
+		}
+		const Common::Point destOrigin(destRect.left, destRect.top);
+
 		const uint8 bwPalette[2 * 3] = {
 			255, 255, 255,
 			0, 0, 0
@@ -1339,8 +1348,12 @@ void ImageElement::render(Window *window) {
 				transColor = optimized->format.ARGBToColor(255, transColorRGB8.r, transColorRGB8.g, transColorRGB8.b);
 			}
 
-			window->getSurface()->transBlitFrom(*optimized, srcRect, destRect, transColor, false, alpha);
+			if (!renderRotated(window, *optimized, srcRect, destOrigin, true, transColor, paletteData, 0))
+				window->getSurface()->transBlitFrom(*optimized, srcRect, destRect, transColor, false, alpha);
 		} else if (inkMode == VisualElementRenderProperties::kInkModeDefault || inkMode == VisualElementRenderProperties::kInkModeCopy) {
+			if (renderRotated(window, *optimized, srcRect, destOrigin, false, 0, paletteData, 0))
+				return;
+
 			if (alpha != 255) {
 				warning("Alpha fade was applied to a default or copy image, this isn't supported yet");
 				_transitionProps.setAlpha(255);
@@ -1626,9 +1639,11 @@ void MToonElement::render(Window *window) {
 				} else
 					transColor = _renderSurface->format.ARGBToColor(255, transColorRGB8.r, transColorRGB8.g, transColorRGB8.b);
 
-				window->getSurface()->transBlitFrom(*_renderSurface, srcRect, destRect, transColor);
+				if (!renderRotated(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), true, transColor, palette ? palette->getPalette() : nullptr, frame + 1))
+					window->getSurface()->transBlitFrom(*_renderSurface, srcRect, destRect, transColor);
 			} else if (inkMode == VisualElementRenderProperties::kInkModeCopy || inkMode == VisualElementRenderProperties::kInkModeDefault) {
-				window->getSurface()->blitFrom(*_renderSurface, srcRect, destRect);
+				if (!renderRotated(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), false, 0, palette ? palette->getPalette() : nullptr, frame + 1))
+					window->getSurface()->blitFrom(*_renderSurface, srcRect, destRect);
 			} else {
 				warning("Unsupported mToon ink mode");
 			}
