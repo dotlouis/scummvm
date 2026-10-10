@@ -36,6 +36,21 @@ bool RotatorModifier::load(const PlugInModifierLoaderContext &context, const Dat
 	return true;
 }
 
+bool RotatorModifier::readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) {
+	// Rotation isn't implemented, so the rotated image always has the size of the element
+	if (attrib == "size") {
+		Structural *owner = findStructuralOwner();
+		if (owner && owner->isElement() && static_cast<Element *>(owner)->isVisual()) {
+			const Common::Rect &rect = static_cast<VisualElement *>(owner)->getRelativeRect();
+			result.setPoint(Common::Point(rect.width(), rect.height()));
+		} else
+			result.setPoint(Common::Point(0, 0));
+		return true;
+	}
+
+	return Modifier::readAttribute(thread, result, attrib);
+}
+
 bool RotatorModifier::respondsToEvent(const Event &evt) const {
 	return false;
 }

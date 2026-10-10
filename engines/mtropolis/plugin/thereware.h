@@ -82,6 +82,8 @@ public:
 
 	bool load(const PlugInModifierLoaderContext &context, const Data::Thereware::RotatorModifier &data);
 
+	bool readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) override;
+
 	bool respondsToEvent(const Event &evt) const override;
 	VThreadState consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) override;
 
