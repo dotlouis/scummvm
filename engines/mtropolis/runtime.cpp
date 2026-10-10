@@ -4098,11 +4098,28 @@ Common::WeakPtr<RuntimeObject> ObjectLinkingScope::resolve(const Common::String 
 	}
 }
 
+static bool runtimeObjectHasName(RuntimeObject *obj, const Common::String &name) {
+	if (obj->isStructural())
+		return caseInsensitiveEqual(static_cast<Structural *>(obj)->getName(), name);
+	if (obj->isModifier())
+		return caseInsensitiveEqual(static_cast<Modifier *>(obj)->getName(), name);
+	return true;
+}
+
 Common::WeakPtr<RuntimeObject> ObjectLinkingScope::resolve(uint32 staticGUID, const Common::String &name, bool isNameAlreadyInsensitive) const {
 	Common::WeakPtr<RuntimeObject> byGUIDResult = resolve(staticGUID);
-	if (!byGUIDResult.expired())
+	if (!byGUIDResult.expired()) {
+		// Some projects contain objects that were copied with stale references, whose GUID now belongs
+		// to an unrelated object. If the GUID match has another name, prefer an object with the right name.
+		Common::SharedPtr<RuntimeObject> byGUIDObject = byGUIDResult.lock();
+		if (!name.empty() && !runtimeObjectHasName(byGUIDObject.get(), name)) {
+			Common::WeakPtr<RuntimeObject> byNameResult = resolve(name, isNameAlreadyInsensitive);
+			if (!byNameResult.expired())
+				return byNameResult;
+		}
+
 		return byGUIDResult;
-	else {
+	} else {
 		Common::WeakPtr<RuntimeObject> fallback = resolve(name, isNameAlreadyInsensitive);
 		if (fallback.expired()) {
 			warning("Couldn't resolve static guid '%x' with name '%s'", staticGUID, name.c_str());
