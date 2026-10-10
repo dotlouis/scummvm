@@ -508,6 +508,20 @@ bool ObjectReferenceVariableModifier::load(const PlugInModifierLoaderContext &co
 	return true;
 }
 
+bool ObjectReferenceVariableModifier::respondsToEvent(const Event &evt) const {
+	return _setToSourceParentWhen.respondsTo(evt);
+}
+
+VThreadState ObjectReferenceVariableModifier::consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
+	// "Set to source's parent": reference the parent of the object that sent the message
+	if (_setToSourceParentWhen.respondsTo(msg->getEvent())) {
+		Common::SharedPtr<RuntimeObject> source = msg->getSource().lock();
+		setObject(source ? getObjectParent(source.get()) : nullptr);
+	}
+
+	return kVThreadReturn;
+}
+
 // Object reference variables are somewhat unusual in that they don't store a simple value,
 // they instead have "object" and "path" attributes AND as a value, they resolve to the
 // modifier itself.
@@ -595,28 +609,28 @@ MiniscriptInstructionOutcome ObjectReferenceVariableModifier::scriptSetPath(Mini
 }
 
 MiniscriptInstructionOutcome ObjectReferenceVariableModifier::scriptSetObject(MiniscriptThread *thread, const DynamicValue &value) {
-	ObjectReferenceVariableStorage *storage = static_cast<ObjectReferenceVariableStorage *>(_storage.get());
-
 	if (value.getType() == DynamicValueTypes::kNull) {
-		storage->_object.reset();
-		storage->_objectPath.clear();
-		storage->_fullPath.clear();
-
+		setObject(nullptr);
 		return kMiniscriptInstructionOutcomeContinue;
 	} else if (value.getType() == DynamicValueTypes::kObject) {
-		Common::SharedPtr<RuntimeObject> obj = value.getObject().object.lock();
-		if (!obj)
-			return scriptSetObject(thread, DynamicValue());
-
-		if (!computeObjectPath(obj.get(), storage->_fullPath))
-			return scriptSetObject(thread, DynamicValue());
-
-		storage->_objectPath = storage->_fullPath;
-		storage->_object.object = obj;
-
+		setObject(value.getObject().object.lock().get());
 		return kMiniscriptInstructionOutcomeContinue;
 	} else
 		return kMiniscriptInstructionOutcomeFailed;
+}
+
+void ObjectReferenceVariableModifier::setObject(RuntimeObject *obj) {
+	ObjectReferenceVariableStorage *storage = static_cast<ObjectReferenceVariableStorage *>(_storage.get());
+
+	if (!obj || !computeObjectPath(obj, storage->_fullPath)) {
+		storage->_object.reset();
+		storage->_objectPath.clear();
+		storage->_fullPath.clear();
+		return;
+	}
+
+	storage->_objectPath = storage->_fullPath;
+	storage->_object.object = obj->getSelfReference();
 }
 
 MiniscriptInstructionOutcome ObjectReferenceVariableModifier::scriptObjectRefAttrib(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib) {

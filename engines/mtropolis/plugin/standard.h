@@ -175,6 +175,9 @@ public:
 
 	bool load(const PlugInModifierLoaderContext &context, const Data::Standard::ObjectReferenceVariableModifier &data);
 
+	bool respondsToEvent(const Event &evt) const override;
+	VThreadState consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) override;
+
 	bool varSetValue(MiniscriptThread *thread, const DynamicValue &value) override;
 	void varGetValue(DynamicValue &dest) const override;
 
@@ -199,6 +202,7 @@ private:
 
 	MiniscriptInstructionOutcome scriptSetPath(MiniscriptThread *thread, const DynamicValue &value);
 	MiniscriptInstructionOutcome scriptSetObject(MiniscriptThread *thread, const DynamicValue &value);
+	void setObject(RuntimeObject *obj);
 	MiniscriptInstructionOutcome scriptObjectRefAttrib(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib);
 	MiniscriptInstructionOutcome scriptObjectRefAttribIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib, const DynamicValue &index);
 
