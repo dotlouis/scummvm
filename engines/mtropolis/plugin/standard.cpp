@@ -1085,7 +1085,33 @@ bool ListVariableModifier::readAttributeIndexed(MiniscriptThread *thread, Dynami
 
 	if (attrib == "value") {
 		size_t realIndex = 0;
-		return storage->_list->dynamicValueToIndex(realIndex, index) && storage->_list->getAtIndex(realIndex, result);
+		if (storage->_list->dynamicValueToIndex(realIndex, index) && storage->_list->getAtIndex(realIndex, result))
+			return true;
+
+		// Reading outside of the list gives a default value instead of stopping the script. Uncle Albert's
+		// Fabulous Voyage reads index 0 of a list for every notebook animal and relies on the rest
+		// of the script running.
+		switch (storage->_preferredContentType) {
+		case DynamicValueTypes::kString:
+			result.setString("");
+			break;
+		case DynamicValueTypes::kInteger:
+			result.setInt(0);
+			break;
+		case DynamicValueTypes::kFloat:
+			result.setFloat(0.0);
+			break;
+		case DynamicValueTypes::kBoolean:
+			result.setBool(false);
+			break;
+		case DynamicValueTypes::kPoint:
+			result.setPoint(Common::Point(0, 0));
+			break;
+		default:
+			result.clear();
+			break;
+		}
+		return true;
 	} else if (attrib == "delete") {
 		size_t realIndex = 0;
 		if (!storage->_list->dynamicValueToIndex(realIndex, index))
