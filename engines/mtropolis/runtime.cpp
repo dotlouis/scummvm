@@ -4794,6 +4794,14 @@ bool Runtime::runFrame() {
 			continue;
 		}
 
+		// Cloned objects get their show check once all pending clones are done
+		if (_pendingPostCloneShowChecks.size() > 0) {
+			for (const Common::WeakPtr<Structural> &clonedObject : _pendingPostCloneShowChecks)
+				_pendingShowClonedObject.push_back(clonedObject);
+			_pendingPostCloneShowChecks.clear();
+			continue;
+		}
+
 		if (_pendingShowClonedObject.size() > 0) {
 			Structural *objectToShow = _pendingShowClonedObject.remove_at(0).lock().get();
 
@@ -5300,6 +5308,16 @@ void Runtime::executeChangeObjectParent(RuntimeObject *object, RuntimeObject *ne
 	}
 }
 
+static void recursiveApplyDefaultVisibility(Runtime *runtime, Structural *structural) {
+	if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+		VisualElement *visual = static_cast<VisualElement *>(structural);
+		visual->setVisible(runtime, visual->isVisibleByDefault());
+	}
+
+	for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+		recursiveApplyDefaultVisibility(runtime, child.get());
+}
+
 void Runtime::executeCloneObject(RuntimeObject *object) {
 	Common::HashMap<RuntimeObject *, RuntimeObject *> objectRemaps;
 
@@ -5349,6 +5367,15 @@ void Runtime::executeCloneObject(RuntimeObject *object) {
 		remapper.visitChildStructuralRef(structuralRef);
 
 		structuralRef->getParent()->addChild(structuralRef);
+
+		// Objects in scenes that were never shown (e.g. library scenes) never had their default visibility
+		// applied, so give the clone its authored visibility before its scripts run.
+		if (Structural *sceneOfOriginal = object->isStructural() ? static_cast<Structural *>(object) : nullptr) {
+			while (sceneOfOriginal && sceneOfOriginal->getSceneLoadState() == Structural::SceneLoadState::kNotAScene)
+				sceneOfOriginal = sceneOfOriginal->getParent();
+			if (sceneOfOriginal && sceneOfOriginal != _activeMainScene.get() && sceneOfOriginal != _activeSharedScene.get())
+				recursiveApplyDefaultVisibility(this, structuralRef.get());
+		}
 
 		_pendingPostCloneShowChecks.push_back(structuralRef);
 
