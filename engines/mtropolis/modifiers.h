@@ -492,7 +492,7 @@ public:
 
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	const char *debugGetTypeName() const override { return "Simple Motion Modifier"; }
-	SupportStatus debugGetSupportStatus() const override { return kSupportStatusNone; }
+	SupportStatus debugGetSupportStatus() const override { return kSupportStatusPartial; }
 #endif
 
 private:
@@ -511,6 +511,9 @@ private:
 
 	void startRandomBounce(Runtime *runtime);
 	void runRandomBounce(Runtime *runtime);
+	void startDirectional(Runtime *runtime);
+	void runDirectional(Runtime *runtime);
+	void translateOwner(Runtime *runtime, const Common::Point &delta);
 
 	Common::SharedPtr<Modifier> shallowClone() const override;
 	const char *getDefaultName() const override;
@@ -526,6 +529,11 @@ private:
 	uint64 _lastTickTime;
 
 	Common::Point _velocity;
+
+	// Into scene and out of scene motion: the whole offset, the part already applied and the step count
+	Common::Point _travel;
+	Common::Point _travelled;
+	uint16 _currentStep;
 
 	Common::SharedPtr<ScheduledEvent> _scheduledEvent;
 };

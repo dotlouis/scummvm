@@ -1250,7 +1250,7 @@ const char *PathMotionModifier::getDefaultName() const {
 	return "Path Motion Modifier";
 }
 
-SimpleMotionModifier::SimpleMotionModifier() : _motionType(kMotionTypeIntoScene), _directionFlags(0), _steps(0), _delayMSecTimes4800(0), _lastTickTime(0) {
+SimpleMotionModifier::SimpleMotionModifier() : _motionType(kMotionTypeIntoScene), _directionFlags(0), _steps(0), _delayMSecTimes4800(0), _lastTickTime(0), _currentStep(0) {
 }
 
 SimpleMotionModifier::~SimpleMotionModifier() {
@@ -1284,6 +1284,8 @@ VThreadState SimpleMotionModifier::consumeMessage(Runtime *runtime, const Common
 		if (!_scheduledEvent) {
 			if (_motionType == kMotionTypeRandomBounce)
 				startRandomBounce(runtime);
+			else if (_motionType == kMotionTypeOutOfScene || _motionType == kMotionTypeIntoScene)
+				startDirectional(runtime);
 			else {
 #ifdef MTROPOLIS_DEBUG_ENABLE
 				if (Debugger *debugger = runtime->debugGetDebugger())
@@ -1384,6 +1386,79 @@ void SimpleMotionModifier::runRandomBounce(Runtime *runtime) {
 	}
 
 	_scheduledEvent = runtime->getScheduler().scheduleMethod<SimpleMotionModifier, &SimpleMotionModifier::runRandomBounce>(currentTime + 1, this);
+}
+
+void SimpleMotionModifier::translateOwner(Runtime *runtime, const Common::Point &delta) {
+	if (delta == Common::Point(0, 0))
+		return;
+
+	Structural *structural = this->findStructuralOwner();
+	if (structural && structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+		VisualElement *visual = static_cast<VisualElement *>(structural);
+		VisualElement::OffsetTranslateTaskData *taskData = runtime->getVThread().pushTask("VisualElement::offsetTranslateTask", visual, &VisualElement::offsetTranslateTask);
+		taskData->dx = delta.x;
+		taskData->dy = delta.y;
+	}
+}
+
+// Out of scene moves the element in the set directions until it is entirely outside of the window. Into scene
+// moves it the same way, from outside of the window to where it is.
+void SimpleMotionModifier::startDirectional(Runtime *runtime) {
+	Structural *structural = this->findStructuralOwner();
+	Window *mainWindow = runtime->getMainWindow().lock().get();
+	if (!structural || !structural->isElement() || !static_cast<Element *>(structural)->isVisual() || !mainWindow)
+		return;
+
+	VisualElement *visual = static_cast<VisualElement *>(structural);
+	const Common::Point pos = visual->getGlobalPosition();
+	const int32 w = visual->getRelativeRect().width();
+	const int32 h = visual->getRelativeRect().height();
+	const int32 windowWidth = mainWindow->getWidth();
+	const int32 windowHeight = mainWindow->getHeight();
+	const bool into = (_motionType == kMotionTypeIntoScene);
+
+	_travel = Common::Point(0, 0);
+	if (_directionFlags & kDirectionFlagDown)
+		_travel.y = into ? pos.y + h : windowHeight - pos.y;
+	else if (_directionFlags & kDirectionFlagUp)
+		_travel.y = into ? pos.y - windowHeight : -(pos.y + h);
+	if (_directionFlags & kDirectionFlagRight)
+		_travel.x = into ? pos.x + w : windowWidth - pos.x;
+	else if (_directionFlags & kDirectionFlagLeft)
+		_travel.x = into ? pos.x - windowWidth : -(pos.x + w);
+
+	_travelled = Common::Point(0, 0);
+	_currentStep = 0;
+	_lastTickTime = runtime->getPlayTime();
+
+	// Into scene starts outside of the window
+	if (into)
+		translateOwner(runtime, Common::Point(-_travel.x, -_travel.y));
+
+	_scheduledEvent = runtime->getScheduler().scheduleMethod<SimpleMotionModifier, &SimpleMotionModifier::runDirectional>(_lastTickTime + 1, this);
+}
+
+void SimpleMotionModifier::runDirectional(Runtime *runtime) {
+	_scheduledEvent.reset();
+
+	const uint steps = MAX<uint>(_steps, 1);
+	const uint64 delayMSec = _delayMSecTimes4800 / 4800u;
+	const uint64 currentTime = runtime->getPlayTime();
+
+	uint stepsDue = steps - _currentStep;
+	if (delayMSec > 0)
+		stepsDue = MIN<uint64>(stepsDue, (currentTime - _lastTickTime) / delayMSec);
+	if (stepsDue > 0) {
+		_currentStep += stepsDue;
+		_lastTickTime = (delayMSec > 0) ? _lastTickTime + stepsDue * delayMSec : currentTime;
+
+		const Common::Point target(_travel.x * (int32)_currentStep / (int32)steps, _travel.y * (int32)_currentStep / (int32)steps);
+		translateOwner(runtime, Common::Point(target.x - _travelled.x, target.y - _travelled.y));
+		_travelled = target;
+	}
+
+	if (_currentStep < steps)
+		_scheduledEvent = runtime->getScheduler().scheduleMethod<SimpleMotionModifier, &SimpleMotionModifier::runDirectional>(currentTime + 1, this);
 }
 
 Common::SharedPtr<Modifier> SimpleMotionModifier::shallowClone() const {
