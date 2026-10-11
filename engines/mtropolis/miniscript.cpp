@@ -1392,6 +1392,46 @@ MiniscriptInstructionOutcome PointCreate::execute(MiniscriptThread *thread) cons
 	return kMiniscriptInstructionOutcomeContinue;
 }
 
+MiniscriptInstructionOutcome VectorCreate::execute(MiniscriptThread *thread) const {
+	// vector(angle, magnitude), with the angle in degrees like the "angle" attribute of vectors
+	if (thread->getStackSize() < 2) {
+		thread->error("Stack underflow");
+		return kMiniscriptInstructionOutcomeFailed;
+	}
+
+	MiniscriptInstructionOutcome outcome = thread->dereferenceRValue(0);
+	if (outcome != kMiniscriptInstructionOutcomeContinue)
+		return outcome;
+
+	outcome = thread->dereferenceRValue(1);
+	if (outcome != kMiniscriptInstructionOutcomeContinue)
+		return outcome;
+
+	DynamicValue &magnitudeVal = thread->getStackValueFromTop(0).value;
+	DynamicValue &angleValDest = thread->getStackValueFromTop(1).value;
+
+	double components[2];
+	DynamicValue *inputs[2] = {&angleValDest, &magnitudeVal};
+
+	for (int i = 0; i < 2; i++) {
+		DynamicValue converted;
+		if (!inputs[i]->convertToType(DynamicValueTypes::kFloat, converted)) {
+			thread->error("Invalid input for vector creation");
+			return kMiniscriptInstructionOutcomeFailed;
+		}
+		components[i] = converted.getFloat();
+	}
+
+	AngleMagVector vec;
+	vec.angleDegrees = components[0];
+	vec.magnitude = components[1];
+	angleValDest.setVector(vec);
+
+	thread->popValues(1);
+
+	return kMiniscriptInstructionOutcomeContinue;
+}
+
 MiniscriptInstructionOutcome RangeCreate::execute(MiniscriptThread *thread) const {
 	if (thread->getStackSize() < 2) {
 		thread->error("Stack underflow");
