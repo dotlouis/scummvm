@@ -1171,7 +1171,7 @@ VThreadState PathMotionModifier::advanceFrameTask(const AdvanceFrameTaskData &ta
 	uint nextPointIndex = 0;
 	if (isPlayingForward) {
 		nextPointIndex = _currentPointIndex + 1;
-		if (nextPointIndex > _points.size())
+		if (nextPointIndex >= _points.size())
 			nextPointIndex = 0;
 	} else {
 		if (_currentPointIndex == 0)
