@@ -1112,6 +1112,7 @@ public:
 	Common::SharedPtr<ModifierSaveLoad> getSaveLoad(Runtime *runtime) override;
 
 	IModifierContainer *getChildContainer() override;
+	IModifierContainer *getMessagePropagationContainer() override;
 
 	bool isCompoundVariable() const override { return true; }
 

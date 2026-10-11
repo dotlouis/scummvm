@@ -2892,6 +2892,12 @@ IModifierContainer *CompoundVariableModifier::getChildContainer() {
 	return this;
 }
 
+// Messages reach the variables in a compound variable, so an object reference variable in it can be set to the
+// source's parent. Uncle Albert's Fabulous Voyage keeps the object that asked for a clone this way.
+IModifierContainer *CompoundVariableModifier::getMessagePropagationContainer() {
+	return this;
+}
+
 const Common::Array<Common::SharedPtr<Modifier> > &CompoundVariableModifier::getModifiers() const {
 	return _children;
 }
