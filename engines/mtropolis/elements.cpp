@@ -1666,6 +1666,21 @@ bool MToonElement::isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) con
 			ColorRGB8 transColorRGB8 = _renderProps.getBackColor();
 			uint32 transColor = _renderSurface->format.ARGBToColor(255, transColorRGB8.r, transColorRGB8.g, transColorRGB8.b);
 
+			if (_renderSurface->format.bytesPerPixel == 1) {
+				// Paletted frames are compared by index, like when they are drawn
+				const Palette *palette = getPalette().get();
+				if (!palette)
+					palette = &getRuntime()->getGlobalPalette();
+
+				const byte *paletteData = palette->getPalette();
+				for (uint i = 0; i < Palette::kNumColors; i++) {
+					if (transColorRGB8 == ColorRGB8(paletteData[i * 3 + 0], paletteData[i * 3 + 1], paletteData[i * 3 + 2])) {
+						transColor = i;
+						break;
+					}
+				}
+			}
+
 			if (frameRect.width() == _renderSurface->w && frameRect.height() == _renderSurface->h) {
 				// Frame rect is the size of the render surface, meaning the frame is floating and we need to adjust to its coordinates
 				relativeX -= frameRect.left;
