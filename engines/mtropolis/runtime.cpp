@@ -2868,6 +2868,13 @@ bool RuntimeObject::isElement() const {
 }
 
 bool RuntimeObject::readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) {
+	// A number that identifies the object while the project runs. Uncle Albert's Fabulous Voyage uses it to tell
+	// toads apart in the sorcerer's hut.
+	if (attrib == "objectid") {
+		result.setInt(static_cast<int32>(_runtimeGUID));
+		return true;
+	}
+
 	return false;
 }
 
