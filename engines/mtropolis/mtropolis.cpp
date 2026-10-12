@@ -328,6 +328,7 @@ Common::Error MTropolisEngine::run() {
 		_runtime->getHacks().deferParentChangesToEndOfNextFrame = true;
 		_runtime->getHacks().swapRestoredPointLists = true;
 		_runtime->getHacks().attribSetVisibleShowsAndHides = true;
+		_runtime->getHacks().modifierVisibleWritesGoToSameNamedElement = true;
 	} else if (_gameDescription->gameID == GID_MTI) {
 		HackSuites::addMTIQuirks(*_gameDescription, _runtime->getHacks());
 	} else if (_gameDescription->gameID == GID_UNIT) {

@@ -10757,6 +10757,15 @@ MiniscriptInstructionOutcome Modifier::writeRefAttribute(MiniscriptThread *threa
 		return kMiniscriptInstructionOutcomeContinue;
 	}
 
+	if (attrib == "visible" && thread->getRuntime()->getHacks().modifierVisibleWritesGoToSameNamedElement) {
+		if (Structural *owner = findStructuralOwner()) {
+			for (const Common::SharedPtr<Structural> &child : owner->getChildren()) {
+				if (child->isElement() && static_cast<Element *>(child.get())->isVisual() && caseInsensitiveEqual(child->getName(), getName()))
+					return child->writeRefAttribute(thread, writeProxy, attrib);
+			}
+		}
+	}
+
 	return RuntimeObject::writeRefAttribute(thread, writeProxy, attrib);
 }
 

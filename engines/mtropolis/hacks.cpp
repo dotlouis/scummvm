@@ -49,6 +49,7 @@ Hacks::Hacks() {
 	deferParentChangesToEndOfNextFrame = false;
 	swapRestoredPointLists = false;
 	attribSetVisibleShowsAndHides = false;
+	modifierVisibleWritesGoToSameNamedElement = false;
 }
 
 Hacks::~Hacks() {

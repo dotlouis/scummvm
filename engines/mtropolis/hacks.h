@@ -71,6 +71,12 @@ struct Hacks {
 	// Uncle Albert's Fabulous Voyage restores some notebook objects this way and waits for their Show event.
 	bool attribSetVisibleShowsAndHides;
 
+	// Writing "visible" to a modifier changes the visibility of the child element of the modifier's owner that has
+	// the modifier's name, instead of being ignored. In Uncle Albert's Fabulous Voyage, the script that takes an
+	// object out of the album margin hides its frame element "cardass" through a reference that the authoring
+	// tool bound to a sound effect modifier also named "cardass", so the frame stayed around the object.
+	bool modifierVisibleWritesGoToSameNamedElement;
+
 	uint midiVolumeScale;	// 256 = 1.0
 
 	uint32 minTransitionDuration;
