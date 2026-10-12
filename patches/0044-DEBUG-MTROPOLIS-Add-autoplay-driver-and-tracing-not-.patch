@@ -1,7 +1,7 @@
-From acd659b98fbad108391a3eed372594c57770d6bb Mon Sep 17 00:00:00 2001
+From eb20efcfb158c32b04cec55702f6434018c02750 Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 16:38:31 -0700
-Subject: [PATCH 43/43] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
+Subject: [PATCH 44/44] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
  for upstream)
 
 Local reverse-engineering tools, not meant to be submitted:
@@ -2637,7 +2637,7 @@ index 32bf8ddf1b..1ebac87deb 100644
  	core.o \
  	coroutine_exec.o \
 diff --git a/engines/mtropolis/mtropolis.cpp b/engines/mtropolis/mtropolis.cpp
-index 57752f6525..9b4ff55ba5 100644
+index ede6f7bfe5..2f35dcbbaf 100644
 --- a/engines/mtropolis/mtropolis.cpp
 +++ b/engines/mtropolis/mtropolis.cpp
 @@ -43,6 +43,7 @@
@@ -2648,7 +2648,7 @@ index 57752f6525..9b4ff55ba5 100644
  #include "mtropolis/boot.h"
  #include "mtropolis/debug.h"
  #include "mtropolis/runtime.h"
-@@ -337,9 +338,14 @@ Common::Error MTropolisEngine::run() {
+@@ -338,9 +339,14 @@ Common::Error MTropolisEngine::run() {
  	}
  
  
@@ -2676,7 +2676,7 @@ index 558f400119..d4585085d4 100644
  }
  
 diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
-index 84e756dc7d..5992d656e2 100644
+index db92960827..9e9f0d5a27 100644
 --- a/engines/mtropolis/runtime.cpp
 +++ b/engines/mtropolis/runtime.cpp
 @@ -4124,6 +4124,34 @@ MiniscriptInstructionOutcome Structural::scriptSetLoop(MiniscriptThread *thread,

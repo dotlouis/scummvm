@@ -58,6 +58,7 @@ The last patch (`DEBUG:`) is local tooling (autoplay driver, tracing) and is not
 | `0040` | Elements hidden by Scene Started scripts stay hidden (the "ATTENTION" texts at the top of the screen) | Yes |
 | `0041` | Text label `<variable>` fields filled in from the start and on every update (the `<texte_trad>` photo frame captions) | Yes |
 | `0042` | `cursorelement` / `cursorhotspot`: tool cursors follow the mouse everywhere (the loupe stuck on the whistle in the bottom margin) | Yes |
+| `0043` | Game hack: writing `visible` to a modifier goes to the same-named child element (object frames removed when an object leaves the margin) | Yes |
 | last, `DEBUG:` | Autoplay driver and tracing | **No**, local tooling only |
 
 The tools, saves, autoplay scripts and notes are in the `oncle-ernest` repository. No game data is included.

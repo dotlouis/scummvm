@@ -1,0 +1,91 @@
+From 02280687bb55135d8675466cab8b78f884250977 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 19:33:10 +0200
+Subject: [PATCH 43/44] MTROPOLIS: Add a hack hiding object frames for Uncle
+ Albert's Fabulous Voyage
+
+Objects put in the album margin get a frame, the "cardass" image element.
+When one is put back on the page, the "init_tr_objet" script of its shared
+behavior hides the frame with "set cardass.visible to false", but the
+reference was bound to a sound effect modifier of the same behavior that
+is also named "cardass". Runtimes before 2.0 ignore writes to "visible"
+on objects that don't have it, so the frame stayed next to the object
+(for example the garlic on the Marseille page).
+
+For this game, writing "visible" to a modifier goes to the child element
+of the modifier's owner that has the modifier's name. It is a hack
+because the authoring tool resolved the name to the modifier and it is
+unknown how the original game hid the frame.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/hacks.cpp     | 1 +
+ engines/mtropolis/hacks.h       | 6 ++++++
+ engines/mtropolis/mtropolis.cpp | 1 +
+ engines/mtropolis/runtime.cpp   | 9 +++++++++
+ 4 files changed, 17 insertions(+)
+
+diff --git a/engines/mtropolis/hacks.cpp b/engines/mtropolis/hacks.cpp
+index 7642ca62ab..d930fc40ee 100644
+--- a/engines/mtropolis/hacks.cpp
++++ b/engines/mtropolis/hacks.cpp
+@@ -49,6 +49,7 @@ Hacks::Hacks() {
+ 	deferParentChangesToEndOfNextFrame = false;
+ 	swapRestoredPointLists = false;
+ 	attribSetVisibleShowsAndHides = false;
++	modifierVisibleWritesGoToSameNamedElement = false;
+ }
+ 
+ Hacks::~Hacks() {
+diff --git a/engines/mtropolis/hacks.h b/engines/mtropolis/hacks.h
+index 86c157559f..9e792beec3 100644
+--- a/engines/mtropolis/hacks.h
++++ b/engines/mtropolis/hacks.h
+@@ -71,6 +71,12 @@ struct Hacks {
+ 	// Uncle Albert's Fabulous Voyage restores some notebook objects this way and waits for their Show event.
+ 	bool attribSetVisibleShowsAndHides;
+ 
++	// Writing "visible" to a modifier changes the visibility of the child element of the modifier's owner that has
++	// the modifier's name, instead of being ignored. In Uncle Albert's Fabulous Voyage, the script that takes an
++	// object out of the album margin hides its frame element "cardass" through a reference that the authoring
++	// tool bound to a sound effect modifier also named "cardass", so the frame stayed around the object.
++	bool modifierVisibleWritesGoToSameNamedElement;
++
+ 	uint midiVolumeScale;	// 256 = 1.0
+ 
+ 	uint32 minTransitionDuration;
+diff --git a/engines/mtropolis/mtropolis.cpp b/engines/mtropolis/mtropolis.cpp
+index 57752f6525..ede6f7bfe5 100644
+--- a/engines/mtropolis/mtropolis.cpp
++++ b/engines/mtropolis/mtropolis.cpp
+@@ -328,6 +328,7 @@ Common::Error MTropolisEngine::run() {
+ 		_runtime->getHacks().deferParentChangesToEndOfNextFrame = true;
+ 		_runtime->getHacks().swapRestoredPointLists = true;
+ 		_runtime->getHacks().attribSetVisibleShowsAndHides = true;
++		_runtime->getHacks().modifierVisibleWritesGoToSameNamedElement = true;
+ 	} else if (_gameDescription->gameID == GID_MTI) {
+ 		HackSuites::addMTIQuirks(*_gameDescription, _runtime->getHacks());
+ 	} else if (_gameDescription->gameID == GID_UNIT) {
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 84e756dc7d..db92960827 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -10753,6 +10753,15 @@ MiniscriptInstructionOutcome Modifier::writeRefAttribute(MiniscriptThread *threa
+ 		return kMiniscriptInstructionOutcomeContinue;
+ 	}
+ 
++	if (attrib == "visible" && thread->getRuntime()->getHacks().modifierVisibleWritesGoToSameNamedElement) {
++		if (Structural *owner = findStructuralOwner()) {
++			for (const Common::SharedPtr<Structural> &child : owner->getChildren()) {
++				if (child->isElement() && static_cast<Element *>(child.get())->isVisual() && caseInsensitiveEqual(child->getName(), getName()))
++					return child->writeRefAttribute(thread, writeProxy, attrib);
++			}
++		}
++	}
++
+ 	return RuntimeObject::writeRefAttribute(thread, writeProxy, attrib);
+ }
+ 
+-- 
+2.47.3
+
