@@ -3090,9 +3090,11 @@ MiniscriptInstructionOutcome WorldManagerInterface::writeRefAttribute(Miniscript
 	} else if (attrib == "cursor") {
 		DynamicValueWriteFuncHelper<WorldManagerInterface, &WorldManagerInterface::setCursor, true>::create(this, result);
 		return kMiniscriptInstructionOutcomeContinue;
-	} else if (attrib == "cursorelement" || attrib == "cursorhotspot") {
-		// Not implemented, the element isn't used as the cursor
-		DynamicValueWriteDiscardHelper::create(result);
+	} else if (attrib == "cursorelement") {
+		DynamicValueWriteFuncHelper<WorldManagerInterface, &WorldManagerInterface::setCursorElement, true>::create(this, result);
+		return kMiniscriptInstructionOutcomeContinue;
+	} else if (attrib == "cursorhotspot") {
+		DynamicValueWriteFuncHelper<WorldManagerInterface, &WorldManagerInterface::setCursorHotspot, true>::create(this, result);
 		return kMiniscriptInstructionOutcomeContinue;
 	}
 	return RuntimeObject::writeRefAttribute(thread, result, attrib);
@@ -3153,6 +3155,35 @@ MiniscriptInstructionOutcome WorldManagerInterface::setAutoResetCursor(Miniscrip
 
 MiniscriptInstructionOutcome WorldManagerInterface::setWinSndBufferSize(MiniscriptThread *thread, const DynamicValue &value) {
 	// Ignore
+	return kMiniscriptInstructionOutcomeContinue;
+}
+
+// The cursor element follows the mouse, with its cursor hotspot under the mouse, and replaces the system cursor.
+// Uncle Albert's Fabulous Voyage uses it for its tool cursors (camera viewfinder, tape recorder, magnifier...):
+// its scripts only place the element once, the player moves it afterwards.
+MiniscriptInstructionOutcome WorldManagerInterface::setCursorElement(MiniscriptThread *thread, const DynamicValue &value) {
+	if (value.getType() == DynamicValueTypes::kObject) {
+		Common::SharedPtr<RuntimeObject> obj = value.getObject().object.lock();
+		if (obj && obj->isElement() && static_cast<Element *>(obj.get())->isVisual()) {
+			thread->getRuntime()->setCursorElement(obj.staticCast<VisualElement>());
+			return kMiniscriptInstructionOutcomeContinue;
+		}
+	}
+
+	if (value.getType() != DynamicValueTypes::kNull)
+		warning("Cursor element set to something that isn't a visual element, using the system cursor");
+
+	thread->getRuntime()->setCursorElement(Common::WeakPtr<VisualElement>());
+	return kMiniscriptInstructionOutcomeContinue;
+}
+
+MiniscriptInstructionOutcome WorldManagerInterface::setCursorHotspot(MiniscriptThread *thread, const DynamicValue &value) {
+	if (value.getType() != DynamicValueTypes::kPoint) {
+		thread->error("Cursor hotspot set to something that isn't a point");
+		return kMiniscriptInstructionOutcomeFailed;
+	}
+
+	thread->getRuntime()->setCursorElementHotspot(value.getPoint());
 	return kMiniscriptInstructionOutcomeContinue;
 }
 
@@ -5940,7 +5971,11 @@ bool Runtime::isModifierMouseInteractive(Modifier *modifier, MouseInteractivityT
 	return false;
 }
 
-void Runtime::recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLayer, int32 &bestStackHeight, bool &bestDirect, Structural *candidate, int32 stackHeight, int32 relativeX, int32 relativeY, MouseInteractivityTestType testType) {
+void Runtime::recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLayer, int32 &bestStackHeight, bool &bestDirect, Structural *candidate, int32 stackHeight, int32 relativeX, int32 relativeY, MouseInteractivityTestType testType, const Structural *cursorElement) {
+	// The cursor element is the mouse pointer: it and its children never get the mouse, the elements under it do
+	if (candidate == cursorElement)
+		return;
+
 	int32 childRelativeX = relativeX;
 	int32 childRelativeY = relativeY;
 	if (candidate->isElement()) {
@@ -5980,7 +6015,7 @@ void Runtime::recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLa
 	}
 
 	for (const Common::SharedPtr<Structural> &child : candidate->getChildren())
-		recursiveFindMouseCollision(bestResult, bestLayer, bestStackHeight, bestDirect, child.get(), stackHeight, childRelativeX, childRelativeY, testType);
+		recursiveFindMouseCollision(bestResult, bestLayer, bestStackHeight, bestDirect, child.get(), stackHeight, childRelativeX, childRelativeY, testType, cursorElement);
 }
 
 void Runtime::queueEventAsLowLevelSceneStateTransitionAction(const Event &evt, Structural *root, bool cascade, bool relay) {
@@ -6493,7 +6528,7 @@ VThreadState Runtime::updateMouseStateTask(const UpdateMouseStateTaskData &data)
 
 		for (size_t ri = 0; ri < _sceneStack.size(); ri++) {
 			const SceneStackEntry &sceneStackEntry = _sceneStack[_sceneStack.size() - 1 - ri];
-			recursiveFindMouseCollision(tracked, bestSceneStack, bestLayer, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, _cachedMousePosition.x, _cachedMousePosition.y, kMouseInteractivityTestMouseClick);
+			recursiveFindMouseCollision(tracked, bestSceneStack, bestLayer, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, _cachedMousePosition.x, _cachedMousePosition.y, kMouseInteractivityTestMouseClick, _elementTrackedToCursor.lock().get());
 		}
 
 		if (tracked) {
@@ -6569,7 +6604,7 @@ VThreadState Runtime::updateMousePositionTask(const UpdateMousePositionTaskData 
 	if (_numMouseBlockers == 0) {
 		for (size_t ri = 0; ri < _sceneStack.size(); ri++) {
 			const SceneStackEntry &sceneStackEntry = _sceneStack[_sceneStack.size() - 1 - ri];
-			recursiveFindMouseCollision(collisionItem, bestSceneStack, bestLayer, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, data.x, data.y, kMouseInteractivityTestAnything);
+			recursiveFindMouseCollision(collisionItem, bestSceneStack, bestLayer, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, data.x, data.y, kMouseInteractivityTestAnything, _elementTrackedToCursor.lock().get());
 		}
 	}
 
@@ -7110,16 +7145,21 @@ void Runtime::setCursorElement(const Common::WeakPtr<VisualElement> &element) {
 	updateMainWindowCursor();
 }
 
+void Runtime::setCursorElementHotspot(const Common::Point &hotspot) {
+	_cursorElementHotspot = hotspot;
+}
+
 void Runtime::updateCursorElementPosition() {
 	Common::SharedPtr<VisualElement> element = _elementTrackedToCursor.lock();
 	if (!element)
 		return;
 
 	Common::Point elementPos = element->getGlobalPosition();
-	if (elementPos != _cachedMousePosition) {
+	Common::Point targetPos(_cachedMousePosition.x - _cursorElementHotspot.x, _cachedMousePosition.y - _cursorElementHotspot.y);
+	if (elementPos != targetPos) {
 		VisualElement::OffsetTranslateTaskData *taskData = _vthread->pushTask("VisualElement::offsetTranslateTask", element.get(), &VisualElement::offsetTranslateTask);
-		taskData->dx = _cachedMousePosition.x - elementPos.x;
-		taskData->dy = _cachedMousePosition.y - elementPos.y;
+		taskData->dx = targetPos.x - elementPos.x;
+		taskData->dy = targetPos.y - elementPos.y;
 	}
 }
 

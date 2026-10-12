@@ -1691,6 +1691,7 @@ public:
 	void checkCollisions(ICollider *optRestrictToCollider);
 
 	void setCursorElement(const Common::WeakPtr<VisualElement> &element);
+	void setCursorElementHotspot(const Common::Point &hotspot);
 	void updateCursorElementPosition();
 
 	void addBoundaryDetector(IBoundaryDetector *boundaryDetector);
@@ -1854,7 +1855,7 @@ private:
 
 	static bool isStructuralMouseInteractive(Structural *structural, MouseInteractivityTestType testType);
 	static bool isModifierMouseInteractive(Modifier *modifier, MouseInteractivityTestType testType);
-	static void recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLayer, int32 &bestStackHeight, bool &bestDirect, Structural *candidate, int32 stackHeight, int32 relativeX, int32 relativeY, MouseInteractivityTestType testType);
+	static void recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLayer, int32 &bestStackHeight, bool &bestDirect, Structural *candidate, int32 stackHeight, int32 relativeX, int32 relativeY, MouseInteractivityTestType testType, const Structural *cursorElement = nullptr);
 
 	void queueEventAsLowLevelSceneStateTransitionAction(const Event &evt, Structural *root, bool cascade, bool relay);
 
@@ -2017,6 +2018,7 @@ private:
 	uint32 _collisionCheckTime;
 
 	Common::WeakPtr<VisualElement> _elementTrackedToCursor;
+	Common::Point _cursorElementHotspot;	// Point of the cursor element that is kept under the mouse
 	//uint32 _elementCursorUpdateTime;
 
 	Common::Array<IPostEffect *> _postEffects;
@@ -2144,6 +2146,8 @@ private:
 	MiniscriptInstructionOutcome setAutoResetCursor(MiniscriptThread *thread, const DynamicValue &value);
 	MiniscriptInstructionOutcome setWinSndBufferSize(MiniscriptThread *thread, const DynamicValue &value);
 	MiniscriptInstructionOutcome setCursor(MiniscriptThread *thread, const DynamicValue &value);
+	MiniscriptInstructionOutcome setCursorElement(MiniscriptThread *thread, const DynamicValue &value);
+	MiniscriptInstructionOutcome setCursorHotspot(MiniscriptThread *thread, const DynamicValue &value);
 
 	int32 _opInt;
 	bool _gameMode;
