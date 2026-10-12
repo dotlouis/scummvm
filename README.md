@@ -59,6 +59,7 @@ The last patch (`DEBUG:`) is local tooling (autoplay driver, tracing) and is not
 | `0041` | Text label `<variable>` fields filled in from the start and on every update (the `<texte_trad>` photo frame captions) | Yes |
 | `0042` | `cursorelement` / `cursorhotspot`: tool cursors follow the mouse everywhere (the loupe stuck on the whistle in the bottom margin) | Yes |
 | `0043` | Game hack: writing `visible` to a modifier goes to the same-named child element (object frames removed when an object leaves the margin) | Yes |
+| `0044` | Visibility changes by scripts are forgotten when a scene loads, not when it is left (black page when coming back to a page) | Yes |
 | last, `DEBUG:` | Autoplay driver and tracing | **No**, local tooling only |
 
 The tools, saves, autoplay scripts and notes are in the `oncle-ernest` repository. No game data is included.

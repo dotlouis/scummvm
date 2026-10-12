@@ -1,0 +1,51 @@
+From c553a9ea844d4c1744a44d8c4f39b9836c99b71f Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 21:08:55 +0200
+Subject: [PATCH 44/45] MTROPOLIS: Clear the visibility changes of scripts when
+ a scene loads
+
+Default visibility leaves alone the elements that a Show or Hide changed
+since their scene started. The marks were cleared when the scene was
+hidden on leaving it, but the Hide events queued by that same step ran
+afterwards and marked every element again. Children are recreated when
+the scene loads again, but the scene element itself stays, so on the next
+visit default visibility no longer showed it.
+
+Clear the marks when the scene is loaded instead, before its Scene
+Started scripts run.
+
+In Uncle Albert's Fabulous Voyage the scene element is the page picture:
+coming back to a page (Marseille, then Paris, then Marseille) showed the
+objects on a black page.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 052b894131..1c5197c377 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -5341,6 +5341,10 @@ void Runtime::executeLowLevelSceneStateTransition(const LowLevelSceneStateTransi
+ 	case LowLevelSceneStateTransitionAction::kLoad:
+ 		loadScene(action.getScene());
+ 
++		// Default visibility only leaves alone the elements that scripts showed or hid since the scene started. The
++		// scene element itself stays loaded between visits, and hiding the scene when it was left marked it too.
++		recursiveClearVisibilityChangedByScript(action.getScene().get());
++
+ 		// Refresh play time so anything time-based doesn't skip ahead
+ 		refreshPlayTime();
+ 		break;
+@@ -5362,7 +5366,6 @@ void Runtime::executeLowLevelSceneStateTransition(const LowLevelSceneStateTransi
+ 		break;
+ 	case LowLevelSceneStateTransitionAction::kHideAllElements:
+ 		executeSceneChangeRecursiveVisibilityChange(action.getScene().get(), false);
+-		recursiveClearVisibilityChangedByScript(action.getScene().get());
+ 		break;
+ 	default:
+ 		assert(false);
+-- 
+2.47.3
+

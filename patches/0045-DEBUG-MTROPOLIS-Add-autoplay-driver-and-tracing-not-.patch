@@ -1,7 +1,7 @@
-From 0e7a79ef686f284aba8bdb3b3226a6fb7f38afc8 Mon Sep 17 00:00:00 2001
+From 8f66092477fb07e24761f7ea675dbefcd2e826de Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 16:38:31 -0700
-Subject: [PATCH 44/44] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
+Subject: [PATCH 45/45] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
  for upstream)
 
 Local reverse-engineering tools, not meant to be submitted:
@@ -2676,7 +2676,7 @@ index 558f400119..d4585085d4 100644
  }
  
 diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
-index 052b894131..0d006786d4 100644
+index 1c5197c377..c85dc13c53 100644
 --- a/engines/mtropolis/runtime.cpp
 +++ b/engines/mtropolis/runtime.cpp
 @@ -4124,6 +4124,34 @@ MiniscriptInstructionOutcome Structural::scriptSetLoop(MiniscriptThread *thread,
@@ -2786,7 +2786,7 @@ index 052b894131..0d006786d4 100644
  }
  
  const Common::SharedPtr<MessageProperties> &MessageDispatch::getMsg() const {
-@@ -6018,12 +6097,71 @@ void Runtime::recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLa
+@@ -6021,12 +6100,71 @@ void Runtime::recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLa
  		recursiveFindMouseCollision(bestResult, bestLayer, bestStackHeight, bestDirect, child.get(), stackHeight, childRelativeX, childRelativeY, testType, cursorElement);
  }
  
@@ -2858,7 +2858,7 @@ index 052b894131..0d006786d4 100644
  void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
  	assert(scene->getSceneLoadState() != Structural::SceneLoadState::kNotAScene);
  
-@@ -6043,6 +6181,8 @@ void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
+@@ -6046,6 +6184,8 @@ void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
  			debug(1, "Scene loaded OK, materializing objects...");
  			scene->materializeDescendents(this, subsection->getSceneLoadMaterializeScope());
  			debug(1, "Scene materialized OK");
@@ -2867,7 +2867,7 @@ index 052b894131..0d006786d4 100644
  		}
  
  		recursiveActivateStructural(scene.get());
-@@ -6531,6 +6671,7 @@ VThreadState Runtime::updateMouseStateTask(const UpdateMouseStateTaskData &data)
+@@ -6534,6 +6674,7 @@ VThreadState Runtime::updateMouseStateTask(const UpdateMouseStateTaskData &data)
  			recursiveFindMouseCollision(tracked, bestSceneStack, bestLayer, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, _cachedMousePosition.x, _cachedMousePosition.y, kMouseInteractivityTestMouseClick, _elementTrackedToCursor.lock().get());
  		}
  
