@@ -1,7 +1,7 @@
-From fa3bdf40bfe1fe07af091218c9a25d0421e61489 Mon Sep 17 00:00:00 2001
+From 2c4f15fd631a743595a2ad89005800fec2c0f2d7 Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 16:38:31 -0700
-Subject: [PATCH 41/41] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
+Subject: [PATCH 42/42] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
  for upstream)
 
 Local reverse-engineering tools, not meant to be submitted:
@@ -33,7 +33,7 @@ Assisted-by: Claude:claude-opus-5-5
 
 diff --git a/engines/mtropolis/autoplay.cpp b/engines/mtropolis/autoplay.cpp
 new file mode 100644
-index 00000000000..7c1dc2ee5d0
+index 0000000000..7c1dc2ee5d
 --- /dev/null
 +++ b/engines/mtropolis/autoplay.cpp
 @@ -0,0 +1,2201 @@
@@ -2240,7 +2240,7 @@ index 00000000000..7c1dc2ee5d0
 +} // End of namespace MTropolis
 diff --git a/engines/mtropolis/autoplay.h b/engines/mtropolis/autoplay.h
 new file mode 100644
-index 00000000000..a4a96cf56b1
+index 0000000000..a4a96cf56b
 --- /dev/null
 +++ b/engines/mtropolis/autoplay.h
 @@ -0,0 +1,215 @@
@@ -2460,7 +2460,7 @@ index 00000000000..a4a96cf56b1
 +
 +#endif
 diff --git a/engines/mtropolis/elements.cpp b/engines/mtropolis/elements.cpp
-index 9707d7f2ef7..b5bb5a91d72 100644
+index 74bc430d18..ac9a1134ec 100644
 --- a/engines/mtropolis/elements.cpp
 +++ b/engines/mtropolis/elements.cpp
 @@ -1366,6 +1366,12 @@ void ImageElement::render(Window *window) {
@@ -2502,7 +2502,7 @@ index 9707d7f2ef7..b5bb5a91d72 100644
  // the element: Uncle Albert's Fabulous Voyage shrinks the objects put in the album margin this way. Elements authored
  // at another size (the tape recorder, whose size only sets its clickable area) are drawn unscaled.
 diff --git a/engines/mtropolis/elements.h b/engines/mtropolis/elements.h
-index d48a1de066e..716ae3620ab 100644
+index ed0d80d3ff..63161aeffe 100644
 --- a/engines/mtropolis/elements.h
 +++ b/engines/mtropolis/elements.h
 @@ -215,6 +215,8 @@ public:
@@ -2526,7 +2526,7 @@ index d48a1de066e..716ae3620ab 100644
  
  	Common::SharedPtr<Structural> shallowClone() const override;
 diff --git a/engines/mtropolis/miniscript.cpp b/engines/mtropolis/miniscript.cpp
-index 7234a8c12f5..aaa0332c092 100644
+index 7234a8c12f..aaa0332c09 100644
 --- a/engines/mtropolis/miniscript.cpp
 +++ b/engines/mtropolis/miniscript.cpp
 @@ -1974,7 +1974,7 @@ void MiniscriptThread::error(const Common::String &message) {
@@ -2539,7 +2539,7 @@ index 7234a8c12f5..aaa0332c092 100644
  	// This should be redundant
  	_failed = true;
 diff --git a/engines/mtropolis/modifiers.cpp b/engines/mtropolis/modifiers.cpp
-index c52d91d961c..0a541cd609a 100644
+index c52d91d961..0a541cd609 100644
 --- a/engines/mtropolis/modifiers.cpp
 +++ b/engines/mtropolis/modifiers.cpp
 @@ -144,6 +144,7 @@ bool BehaviorModifier::load(ModifierLoaderContext &context, const Data::Behavior
@@ -2625,7 +2625,7 @@ index c52d91d961c..0a541cd609a 100644
  }
  
 diff --git a/engines/mtropolis/module.mk b/engines/mtropolis/module.mk
-index 32bf8ddf1b8..1ebac87deba 100644
+index 32bf8ddf1b..1ebac87deb 100644
 --- a/engines/mtropolis/module.mk
 +++ b/engines/mtropolis/module.mk
 @@ -4,6 +4,7 @@ MODULE_OBJS = \
@@ -2637,7 +2637,7 @@ index 32bf8ddf1b8..1ebac87deba 100644
  	core.o \
  	coroutine_exec.o \
 diff --git a/engines/mtropolis/mtropolis.cpp b/engines/mtropolis/mtropolis.cpp
-index 57752f65254..9b4ff55ba56 100644
+index 57752f6525..9b4ff55ba5 100644
 --- a/engines/mtropolis/mtropolis.cpp
 +++ b/engines/mtropolis/mtropolis.cpp
 @@ -43,6 +43,7 @@
@@ -2664,7 +2664,7 @@ index 57752f65254..9b4ff55ba56 100644
  			break;
  
 diff --git a/engines/mtropolis/plugin/standard.cpp b/engines/mtropolis/plugin/standard.cpp
-index 558f4001193..d4585085d49 100644
+index 558f400119..d4585085d4 100644
 --- a/engines/mtropolis/plugin/standard.cpp
 +++ b/engines/mtropolis/plugin/standard.cpp
 @@ -505,6 +505,7 @@ bool ObjectReferenceVariableModifier::load(const PlugInModifierLoaderContext &co
@@ -2676,7 +2676,7 @@ index 558f4001193..d4585085d49 100644
  }
  
 diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
-index 4bddd75b605..f1f1eb7eae5 100644
+index 4bddd75b60..f1f1eb7eae 100644
 --- a/engines/mtropolis/runtime.cpp
 +++ b/engines/mtropolis/runtime.cpp
 @@ -4093,6 +4093,34 @@ MiniscriptInstructionOutcome Structural::scriptSetLoop(MiniscriptThread *thread,
@@ -2876,7 +2876,7 @@ index 4bddd75b605..f1f1eb7eae5 100644
  			_mouseTrackingObject = tracked->getSelfReference().staticCast<Structural>();
  			_mouseTrackingDragStart = _cachedMousePosition;
 diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
-index 9b9d9c37b85..385463f2a89 100644
+index 9b9d9c37b8..385463f2a8 100644
 --- a/engines/mtropolis/runtime.h
 +++ b/engines/mtropolis/runtime.h
 @@ -1729,6 +1729,9 @@ public:
@@ -2890,5 +2890,5 @@ index 9b9d9c37b85..385463f2a89 100644
  	Debugger *debugGetDebugger() const;
  
 -- 
-2.54.0 (Apple Git-157)
+2.47.3
 

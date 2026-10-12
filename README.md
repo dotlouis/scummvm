@@ -56,6 +56,7 @@ The last patch (`DEBUG:`) is local tooling (autoplay driver, tracing) and is not
 | `0038` | Into scene and out of scene Simple Motion (the lid of the Tahiti sextant box) | Yes |
 | `0039` | Elements drawn at the size scripts give them: Rotator size, resized mToons (objects shrunk into their margin frames) | Yes |
 | `0040` | Elements hidden by Scene Started scripts stay hidden (the "ATTENTION" texts at the top of the screen) | Yes |
+| `0041` | Text label `<variable>` fields filled in from the start and on every update (the `<texte_trad>` photo frame captions) | Yes |
 | last, `DEBUG:` | Autoplay driver and tracing | **No**, local tooling only |
 
 The tools, saves, autoplay scripts and notes are in the `oncle-ernest` repository. No game data is included.

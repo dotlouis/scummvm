@@ -1,0 +1,171 @@
+From 2ca85457e3495dc3c7458c4ee2a70e42285fd4cc Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 18:59:40 +0200
+Subject: [PATCH 41/42] MTROPOLIS: Show the calculated fields of text labels
+ from the start
+
+Text labels with <variable> fields only showed the values after an
+Update Calculated Fields command, and the command replaced the fields in
+the text itself, so a second update could not change them any more.
+
+Keep the text with its fields and fill them in from it: when the label
+is first drawn, and again on each Update Calculated Fields command.
+Text set by scripts or typed in becomes the new source text.
+
+Uncle Albert's Fabulous Voyage never sends the command to the captions
+of its photo frames, which showed "<texte_trad>" instead of their text
+(for example "photo de mouette" on the Marseille page).
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/elements.cpp | 44 +++++++++++++++++++++++-----------
+ engines/mtropolis/elements.h   |  2 ++
+ 2 files changed, 32 insertions(+), 14 deletions(-)
+
+diff --git a/engines/mtropolis/elements.cpp b/engines/mtropolis/elements.cpp
+index 9707d7f2ef..74bc430d18 100644
+--- a/engines/mtropolis/elements.cpp
++++ b/engines/mtropolis/elements.cpp
+@@ -2100,12 +2100,13 @@ MiniscriptInstructionOutcome MToonElement::scriptSetRate(MiniscriptThread *threa
+ 
+ TextLabelElement::TextLabelElement()
+ 	: _cacheBitmap(false), _needsRender(false), _isBitmap(true), _assetID(0),
+-	  _macFontID(0), _size(12), _alignment(kTextAlignmentLeft), _editReplacesText(false) {
++	  _calculatedFieldsPending(false), _macFontID(0), _size(12), _alignment(kTextAlignmentLeft), _editReplacesText(false) {
+ }
+ 
+ TextLabelElement::TextLabelElement(const TextLabelElement &other)
+ 	: VisualElement(other), _cacheBitmap(other._cacheBitmap), _needsRender(other._needsRender), _isBitmap(other._isBitmap)
+-	, _assetID(other._assetID), _text(other._text), _macFontID(other._macFontID), _fontFamilyName(other._fontFamilyName)
++	, _assetID(other._assetID), _text(other._text), _calculatedFieldsSource(other._calculatedFieldsSource)
++	, _calculatedFieldsPending(other._calculatedFieldsPending), _macFontID(other._macFontID), _fontFamilyName(other._fontFamilyName)
+ 	, _size(other._size), _alignment(other._alignment), _styleFlags(other._styleFlags), _macFormattingSpans(other._macFormattingSpans)
+ 	, _editReplacesText(false), _renderedText(nullptr) {
+ 
+@@ -2214,6 +2215,8 @@ void TextLabelElement::activate() {
+ 		_isBitmap = false;
+ 		_text = textAsset->getString();
+ 		_macFormattingSpans = textAsset->getMacFormattingSpans();
++		_calculatedFieldsSource = _text;
++		_calculatedFieldsPending = true;
+ 	}
+ }
+ 
+@@ -2258,6 +2261,7 @@ void TextLabelElement::onKeyboardEvent(Runtime *runtime, const KeyboardInputEven
+ 			_text.deleteLastChar();
+ 
+ 		_editReplacesText = false;
++		_calculatedFieldsSource = _text;
+ 		onTextChanged();
+ 		return;
+ 	}
+@@ -2278,30 +2282,36 @@ void TextLabelElement::onKeyboardEvent(Runtime *runtime, const KeyboardInputEven
+ 		_text += encoded;
+ 
+ 	_editReplacesText = false;
++	_calculatedFieldsSource = _text;
+ 	onTextChanged();
+ }
+ 
++// Fills the <variable> fields of the text with the values of the variables of those names, looked up from the label
++// outward. The fields are kept in _calculatedFieldsSource, so the text can be updated again when the values change.
++// Labels show their fields filled in from the start: Uncle Albert's Fabulous Voyage never sends Update Calculated
++// Fields to some of them (the "<texte_trad>" captions of the photo frames).
+ void TextLabelElement::updateCalculatedFields() {
++	_calculatedFieldsPending = false;
+ 	if (_isBitmap)
+ 		return;
+ 
++	const Common::String &source = _calculatedFieldsSource;
+ 	Common::String newText;
+-	bool changed = false;
+ 
+ 	size_t pos = 0;
+-	while (pos < _text.size()) {
+-		size_t fieldStart = _text.find('<', pos);
++	while (pos < source.size()) {
++		size_t fieldStart = source.find('<', pos);
+ 		if (fieldStart == Common::String::npos)
+ 			break;
+ 
+-		size_t fieldEnd = _text.find('>', fieldStart + 1);
++		size_t fieldEnd = source.find('>', fieldStart + 1);
+ 		if (fieldEnd == Common::String::npos)
+ 			break;
+ 
+-		newText += _text.substr(pos, fieldStart - pos);
++		newText += source.substr(pos, fieldStart - pos);
+ 		pos = fieldEnd + 1;
+ 
+-		Common::String varName = _text.substr(fieldStart + 1, fieldEnd - fieldStart - 1);
++		Common::String varName = source.substr(fieldStart + 1, fieldEnd - fieldStart - 1);
+ 		Common::String formatted;
+ 		bool resolved = false;
+ 
+@@ -2336,17 +2346,16 @@ void TextLabelElement::updateCalculatedFields() {
+ 			}
+ 		}
+ 
+-		if (resolved) {
++		if (resolved)
+ 			newText += formatted;
+-			changed = true;
+-		} else
+-			newText += _text.substr(fieldStart, pos - fieldStart);
++		else
++			newText += source.substr(fieldStart, pos - fieldStart);
+ 	}
+ 
+-	if (!changed)
++	newText += source.substr(pos);
++	if (newText == _text)
+ 		return;
+ 
+-	newText += _text.substr(pos);
+ 	_text = newText;
+ 	_editReplacesText = (_keyboardSignaller != nullptr);
+ 	onTextChanged();
+@@ -2375,6 +2384,9 @@ void TextLabelElement::render(Window *window) {
+ 	if (!_visible)
+ 		return;
+ 
++	if (_calculatedFieldsPending)
++		updateCalculatedFields();
++
+ 	int renderWidth = _rect.width();
+ 	int renderHeight = _rect.height();
+ 	if (_renderedText) {
+@@ -2587,6 +2599,8 @@ MiniscriptInstructionOutcome TextLabelElement::scriptSetText(MiniscriptThread *t
+ 	}
+ 
+ 	_text = value.getString();
++	_calculatedFieldsSource = _text;
++	_calculatedFieldsPending = false;
+ 	_needsRender = true;
+ 	_isBitmap = false;
+ 	_contentsDirty = true;
+@@ -2618,6 +2632,8 @@ MiniscriptInstructionOutcome TextLabelElement::scriptSetLine(MiniscriptThread *t
+ 		_text += derefValue.getString();
+ 	}
+ 
++	_calculatedFieldsSource = _text;
++	_calculatedFieldsPending = false;
+ 	_needsRender = true;
+ 	_isBitmap = false;
+ 	_contentsDirty = true;
+diff --git a/engines/mtropolis/elements.h b/engines/mtropolis/elements.h
+index d48a1de066..ed0d80d3ff 100644
+--- a/engines/mtropolis/elements.h
++++ b/engines/mtropolis/elements.h
+@@ -398,6 +398,8 @@ private:
+ 	uint32 _assetID;
+ 
+ 	Common::String _text;
++	Common::String _calculatedFieldsSource;	// The text with its <variable> fields, see updateCalculatedFields
++	bool _calculatedFieldsPending;	// Fields not shown yet: they are filled in when the label is first drawn
+ 	uint16 _macFontID;
+ 	Common::String _fontFamilyName;
+ 	uint _size;
+-- 
+2.47.3
+
