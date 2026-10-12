@@ -5295,6 +5295,13 @@ void Runtime::executeTeardown(const Teardown &teardown) {
 	}
 }
 
+static void recursiveClearVisibilityChangedByScript(Structural *structural) {
+	if (structural->isElement() && static_cast<Element *>(structural)->isVisual())
+		static_cast<VisualElement *>(structural)->clearVisibilityChangedByScript();
+	for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+		recursiveClearVisibilityChangedByScript(child.get());
+}
+
 void Runtime::executeLowLevelSceneStateTransition(const LowLevelSceneStateTransitionAction &action) {
 	switch (action.getActionType()) {
 	case LowLevelSceneStateTransitionAction::kSendMessage:
@@ -5324,6 +5331,7 @@ void Runtime::executeLowLevelSceneStateTransition(const LowLevelSceneStateTransi
 		break;
 	case LowLevelSceneStateTransitionAction::kHideAllElements:
 		executeSceneChangeRecursiveVisibilityChange(action.getScene().get(), false);
+		recursiveClearVisibilityChangedByScript(action.getScene().get());
 		break;
 	default:
 		assert(false);
@@ -6662,7 +6670,9 @@ VThreadState Runtime::updateMousePositionTask(const UpdateMousePositionTaskData 
 VThreadState Runtime::applyDefaultVisibility(const ApplyDefaultVisibilityTaskData &data) {
 	Event evt;
 	if (data.targetVisibility) {
-		if (data.element->isVisibleByDefault() == false || data.element->isVisible())
+		// Default visibility is applied after Scene Started: an element that a Scene Started script hid stays
+		// hidden (Uncle Albert's Fabulous Voyage hides its warning labels this way)
+		if (data.element->isVisibleByDefault() == false || data.element->isVisible() || data.element->isVisibilityChangedByScript())
 			return kVThreadReturn;
 
 		evt = Event(EventIDs::kElementShow, 0);
@@ -9325,13 +9335,13 @@ VisualElementRenderProperties &VisualElementRenderProperties::operator=(const Vi
 }
 
 VisualElement::VisualElement()
-	: _rect(0, 0, 0, 0), _cachedAbsoluteOrigin(Common::Point(0, 0)), _contentsDirty(true), _directToScreen(false), _visible(false), _visibleByDefault(true), _layer(0),
+	: _rect(0, 0, 0, 0), _cachedAbsoluteOrigin(Common::Point(0, 0)), _contentsDirty(true), _directToScreen(false), _visible(false), _visibilityChangedByScript(false), _visibleByDefault(true), _layer(0),
 	  _topLeftBevelShading(0), _bottomRightBevelShading(0), _interiorShading(0), _bevelSize(0),
 	  _hasRotation(false), _rotationAngle(0.0), _rotationScaleX(1.0), _rotationScaleY(1.0), _rotationCacheKey(0), _rotationCacheAngle(0.0), _rotationCacheScaleX(1.0), _rotationCacheScaleY(1.0), _rotationCacheSource(nullptr), _rotationCacheTransColor(0) {
 }
 
 VisualElement::VisualElement(const VisualElement &other)
-	: Element(other), _directToScreen(other._directToScreen), _visible(other._visible), _visibleByDefault(other._visibleByDefault)
+	: Element(other), _directToScreen(other._directToScreen), _visible(other._visible), _visibilityChangedByScript(other._visibilityChangedByScript), _visibleByDefault(other._visibleByDefault)
 	, _rect(other._rect), _cachedAbsoluteOrigin(other._cachedAbsoluteOrigin), _layer(other._layer), _topLeftBevelShading(other._topLeftBevelShading)
 	, _bottomRightBevelShading(other._bottomRightBevelShading), _interiorShading(other._interiorShading), _bevelSize(other._bevelSize)
 	, _dragProps(nullptr), _renderProps(other._renderProps), _primaryGraphicModifier(nullptr), _transitionProps(other._transitionProps)
@@ -9390,6 +9400,7 @@ CORO_BEGIN_DEFINITION(VisualElement::VisualElementConsumeCommandCoroutine)
 
 	CORO_BEGIN_FUNCTION
 		CORO_IF(Event(EventIDs::kElementShow, 0).respondsTo(params->msg->getEvent()))
+			params->self->_visibilityChangedByScript = true;
 			if (!params->self->_visible) {
 				params->self->_visible = true;
 				params->runtime->setSceneGraphDirty();
@@ -9402,6 +9413,7 @@ CORO_BEGIN_DEFINITION(VisualElement::VisualElementConsumeCommandCoroutine)
 
 			CORO_RETURN;
 		CORO_ELSE_IF(Event(EventIDs::kElementHide, 0).respondsTo(params->msg->getEvent()))
+			params->self->_visibilityChangedByScript = true;
 			if (params->self->_visible) {
 				params->self->_visible = false;
 

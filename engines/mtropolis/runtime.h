@@ -2859,6 +2859,8 @@ public:
 
 	bool isVisible() const;
 	bool isVisibleByDefault() const;
+	bool isVisibilityChangedByScript() const { return _visibilityChangedByScript; }
+	void clearVisibilityChangedByScript() { _visibilityChangedByScript = false; }
 	void setVisible(Runtime *runtime, bool visible);
 
 	bool isDirectToScreen() const;
@@ -3009,6 +3011,7 @@ protected:
 
 	bool _directToScreen;
 	bool _visible;
+	bool _visibilityChangedByScript;	// Shown or hidden by a script since the scene started: default visibility leaves it
 	bool _visibleByDefault;
 	Common::Rect _rect;
 	Common::Point _cachedAbsoluteOrigin;
