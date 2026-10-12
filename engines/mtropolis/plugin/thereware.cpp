@@ -26,7 +26,7 @@ namespace MTropolis {
 
 namespace Thereware {
 
-RotatorModifier::RotatorModifier() : _haveSize(false), _sizeX(0), _sizeY(0), _angle(0.0) {
+RotatorModifier::RotatorModifier() : _haveSize(false), _sizeX(0), _sizeY(0), _initialSizeX(0), _initialSizeY(0), _angle(0.0) {
 }
 
 RotatorModifier::~RotatorModifier() {
@@ -46,11 +46,14 @@ void RotatorModifier::initSize() {
 		_sizeX = rect.width();
 		_sizeY = rect.height();
 	}
+	_initialSizeX = _sizeX;
+	_initialSizeY = _sizeY;
 	_haveSize = true;
 }
 
 bool RotatorModifier::readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) {
-	// The size is only stored. It starts as the size of the element, which is what an unrotated image has.
+	// The size starts as the size of the element. Changing it scales the drawn image by the same ratio, from the
+	// element's top left corner (Uncle Albert's Fabulous Voyage shrinks the objects put in the album margin this way).
 	if (attrib == "size") {
 		initSize();
 		result.setPoint(Common::Point(_sizeX, _sizeY));
@@ -140,8 +143,14 @@ MiniscriptInstructionOutcome RotatorModifier::scriptWriteRefAxisOffsetAttribute(
 
 void RotatorModifier::updateOwnerRotation() {
 	Structural *owner = findStructuralOwner();
-	if (owner && owner->isElement() && static_cast<Element *>(owner)->isVisual())
-		static_cast<VisualElement *>(owner)->setRotation(_angle, _axisOffset);
+	if (owner && owner->isElement() && static_cast<Element *>(owner)->isVisual()) {
+		double scaleX = 1.0, scaleY = 1.0;
+		if (_haveSize && _initialSizeX > 0 && _initialSizeY > 0) {
+			scaleX = static_cast<double>(_sizeX) / _initialSizeX;
+			scaleY = static_cast<double>(_sizeY) / _initialSizeY;
+		}
+		static_cast<VisualElement *>(owner)->setRotation(_angle, _axisOffset, scaleX, scaleY);
+	}
 }
 
 MiniscriptInstructionOutcome RotatorModifier::scriptSetSize(MiniscriptThread *thread, const DynamicValue &value) {
@@ -150,16 +159,37 @@ MiniscriptInstructionOutcome RotatorModifier::scriptSetSize(MiniscriptThread *th
 
 	_sizeX = value.getPoint().x;
 	_sizeY = value.getPoint().y;
+	updateOwnerRotation();
+	return kMiniscriptInstructionOutcomeContinue;
+}
+
+MiniscriptInstructionOutcome RotatorModifier::scriptSetSizeX(MiniscriptThread *thread, const DynamicValue &value) {
+	DynamicValue converted;
+	if (!value.convertToType(DynamicValueTypes::kInteger, converted))
+		return kMiniscriptInstructionOutcomeFailed;
+
+	_sizeX = converted.getInt();
+	updateOwnerRotation();
+	return kMiniscriptInstructionOutcomeContinue;
+}
+
+MiniscriptInstructionOutcome RotatorModifier::scriptSetSizeY(MiniscriptThread *thread, const DynamicValue &value) {
+	DynamicValue converted;
+	if (!value.convertToType(DynamicValueTypes::kInteger, converted))
+		return kMiniscriptInstructionOutcomeFailed;
+
+	_sizeY = converted.getInt();
+	updateOwnerRotation();
 	return kMiniscriptInstructionOutcomeContinue;
 }
 
 MiniscriptInstructionOutcome RotatorModifier::scriptWriteRefSizeAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib) {
 	if (attrib == "x") {
-		DynamicValueWriteIntegerHelper<int32>::create(&_sizeX, proxy);
+		DynamicValueWriteFuncHelper<RotatorModifier, &RotatorModifier::scriptSetSizeX, true>::create(this, proxy);
 		return kMiniscriptInstructionOutcomeContinue;
 	}
 	if (attrib == "y") {
-		DynamicValueWriteIntegerHelper<int32>::create(&_sizeY, proxy);
+		DynamicValueWriteFuncHelper<RotatorModifier, &RotatorModifier::scriptSetSizeY, true>::create(this, proxy);
 		return kMiniscriptInstructionOutcomeContinue;
 	}
 

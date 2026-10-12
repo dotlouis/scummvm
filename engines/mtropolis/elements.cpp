@@ -1397,7 +1397,8 @@ MToonElement::MToonElement(const MToonElement &other)
 	: VisualElement(other), _cacheBitmap(other._cacheBitmap), _maintainRate(other._maintainRate), _assetID(other._assetID)
 	, _rateTimes100000(other._rateTimes100000), _flushPriority(other._flushPriority), _celStartTimeMSec(other._celStartTimeMSec)
 	, _isPlaying(other._isPlaying), _isStopped(other._isStopped), _renderSurface(nullptr), _renderedFrame(0), _metadata(other._metadata)
-	, _cachedMToon(other._cachedMToon), _playMediaSignaller(nullptr), _playRange(other._playRange), _cel(other._cel), _hasIssuedRenderWarning(false) {
+	, _cachedMToon(other._cachedMToon), _playMediaSignaller(nullptr), _playRange(other._playRange), _cel(other._cel), _hasIssuedRenderWarning(false)
+	, _loadedSize(other._loadedSize) {
 	_playMediaSignaller = other.getRuntime()->getProject()->notifyOnPlayMedia(this);
 }
 
@@ -1410,6 +1411,7 @@ bool MToonElement::load(ElementLoaderContext &context, const Data::MToonElement 
 	if (!loadCommon(data.name, data.guid, data.rect1, data.elementFlags, data.layer, data.streamLocator, data.sectionID))
 		return false;
 
+	_loadedSize = Common::Point(_rect.width(), _rect.height());
 	_cacheBitmap = ((data.elementFlags & Data::ElementFlags::kCacheBitmap) != 0);
 	_paused = ((data.elementFlags & Data::ElementFlags::kPaused) != 0);
 	_loop = ((data.animationFlags & Data::AnimationFlags::kLoop) != 0);
@@ -1611,6 +1613,8 @@ void MToonElement::render(Window *window) {
 				srcRect = Common::Rect(frameRect.left, frameRect.top, frameRect.right, frameRect.bottom);
 			}
 			destRect = Common::Rect(_cachedAbsoluteOrigin.x + frameRect.left, _cachedAbsoluteOrigin.y + frameRect.top, _cachedAbsoluteOrigin.x + frameRect.right, _cachedAbsoluteOrigin.y + frameRect.bottom);
+			const Common::Point centering = getRotatorCentering();
+			destRect.translate(centering.x, centering.y);
 
 			if (inkMode == VisualElementRenderProperties::kInkModeBackgroundMatte || inkMode == VisualElementRenderProperties::kInkModeBackgroundTransparent) {
 				ColorRGB8 transColorRGB8 = _renderProps.getBackColor();
@@ -1639,10 +1643,10 @@ void MToonElement::render(Window *window) {
 				} else
 					transColor = _renderSurface->format.ARGBToColor(255, transColorRGB8.r, transColorRGB8.g, transColorRGB8.b);
 
-				if (!renderRotated(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), true, transColor, palette ? palette->getPalette() : nullptr, frame + 1))
+				if (!renderFrameTransformed(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), true, transColor, palette ? palette->getPalette() : nullptr, frame + 1))
 					window->getSurface()->transBlitFrom(*_renderSurface, srcRect, destRect, transColor);
 			} else if (inkMode == VisualElementRenderProperties::kInkModeCopy || inkMode == VisualElementRenderProperties::kInkModeDefault) {
-				if (!renderRotated(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), false, 0, palette ? palette->getPalette() : nullptr, frame + 1))
+				if (!renderFrameTransformed(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), false, 0, palette ? palette->getPalette() : nullptr, frame + 1))
 					window->getSurface()->blitFrom(*_renderSurface, srcRect, destRect);
 			} else {
 				warning("Unsupported mToon ink mode");
@@ -1651,9 +1655,50 @@ void MToonElement::render(Window *window) {
 	}
 }
 
+// An mToon authored at its natural size (the element is as large as the mToon) is stretched when a script resizes
+// the element: Uncle Albert's Fabulous Voyage shrinks the objects put in the album margin this way. Elements authored
+// at another size (the tape recorder, whose size only sets its clickable area) are drawn unscaled.
+void MToonElement::getSizeScale(double &scaleX, double &scaleY) const {
+	scaleX = scaleY = 1.0;
+	if (!_metadata || _metadata->rect.width() != _loadedSize.x || _metadata->rect.height() != _loadedSize.y)
+		return;
+	if (!hasRotation() && _loadedSize.x > 0 && _loadedSize.y > 0) {
+		scaleX = static_cast<double>(_rect.width()) / _loadedSize.x;
+		scaleY = static_cast<double>(_rect.height()) / _loadedSize.y;
+	}
+}
+
+// With a Rotator, the element is as large as the bounds of the rotated mToon, and the mToon is centered in it
+Common::Point MToonElement::getRotatorCentering() const {
+	if (!hasRotation() || !_metadata)
+		return Common::Point(0, 0);
+	const Common::Rect &bounds = _metadata->rect;
+	return Common::Point((_rect.width() - bounds.width()) / 2 - bounds.left, (_rect.height() - bounds.height()) / 2 - bounds.top);
+}
+
+// A Rotator draws the frame rotated; otherwise a frame of an element resized by a script is stretched to it
+bool MToonElement::renderFrameTransformed(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey) {
+	if (hasRotation())
+		return renderRotated(window, src, srcRect, destOrigin, hasTransColor, transColor, palette, cacheKey);
+
+	double scaleX, scaleY;
+	getSizeScale(scaleX, scaleY);
+	return renderTransformed(window, src, srcRect, destOrigin, hasTransColor, transColor, palette, cacheKey, 0.0, Common::Point(), scaleX, scaleY);
+}
+
 bool MToonElement::isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) const {
 	relativeX -= _rect.left;
 	relativeY -= _rect.top;
+
+	double scaleX, scaleY;
+	getSizeScale(scaleX, scaleY);
+	if (scaleX > 0.0 && scaleY > 0.0 && (scaleX != 1.0 || scaleY != 1.0)) {
+		relativeX = static_cast<int32>(relativeX / scaleX);
+		relativeY = static_cast<int32>(relativeY / scaleY);
+	}
+	const Common::Point centering = getRotatorCentering();
+	relativeX -= centering.x;
+	relativeY -= centering.y;
 
 	if (_renderSurface) {
 		Common::Rect frameRect = _metadata->frames[_renderedFrame].rect;

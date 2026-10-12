@@ -9327,7 +9327,7 @@ VisualElementRenderProperties &VisualElementRenderProperties::operator=(const Vi
 VisualElement::VisualElement()
 	: _rect(0, 0, 0, 0), _cachedAbsoluteOrigin(Common::Point(0, 0)), _contentsDirty(true), _directToScreen(false), _visible(false), _visibleByDefault(true), _layer(0),
 	  _topLeftBevelShading(0), _bottomRightBevelShading(0), _interiorShading(0), _bevelSize(0),
-	  _hasRotation(false), _rotationAngle(0.0), _rotationCacheKey(0), _rotationCacheAngle(0.0), _rotationCacheSource(nullptr), _rotationCacheTransColor(0) {
+	  _hasRotation(false), _rotationAngle(0.0), _rotationScaleX(1.0), _rotationScaleY(1.0), _rotationCacheKey(0), _rotationCacheAngle(0.0), _rotationCacheScaleX(1.0), _rotationCacheScaleY(1.0), _rotationCacheSource(nullptr), _rotationCacheTransColor(0) {
 }
 
 VisualElement::VisualElement(const VisualElement &other)
@@ -9336,7 +9336,7 @@ VisualElement::VisualElement(const VisualElement &other)
 	, _bottomRightBevelShading(other._bottomRightBevelShading), _interiorShading(other._interiorShading), _bevelSize(other._bevelSize)
 	, _dragProps(nullptr), _renderProps(other._renderProps), _primaryGraphicModifier(nullptr), _transitionProps(other._transitionProps)
 	, _palette(other._palette), _prevRect(other._prevRect), _contentsDirty(true)
-	, _hasRotation(other._hasRotation), _rotationAngle(other._rotationAngle), _rotationAxisOffset(other._rotationAxisOffset), _rotationCacheKey(0), _rotationCacheAngle(0.0), _rotationCacheSource(nullptr), _rotationCacheTransColor(0) {
+	, _hasRotation(other._hasRotation), _rotationAngle(other._rotationAngle), _rotationAxisOffset(other._rotationAxisOffset), _rotationScaleX(other._rotationScaleX), _rotationScaleY(other._rotationScaleY), _rotationCacheKey(0), _rotationCacheAngle(0.0), _rotationCacheScaleX(1.0), _rotationCacheScaleY(1.0), _rotationCacheSource(nullptr), _rotationCacheTransColor(0) {
 }
 
 bool VisualElement::isVisual() const {
@@ -9813,15 +9813,17 @@ bool VisualElement::hasDisplayBitmapSource() const {
 	return !_displayBitmapSource.expired();
 }
 
-void VisualElement::setRotation(double angle, const Common::Point &axisOffset) {
+void VisualElement::setRotation(double angle, const Common::Point &axisOffset, double scaleX, double scaleY) {
 	if (!_hasRotation) {
 		_hasRotation = true;
 		_contentsDirty = true;
 	}
 
-	if (angle != _rotationAngle || axisOffset != _rotationAxisOffset) {
+	if (angle != _rotationAngle || axisOffset != _rotationAxisOffset || scaleX != _rotationScaleX || scaleY != _rotationScaleY) {
 		_rotationAngle = angle;
 		_rotationAxisOffset = axisOffset;
+		_rotationScaleX = scaleX;
+		_rotationScaleY = scaleY;
 		_contentsDirty = true;
 	}
 }
@@ -9831,28 +9833,48 @@ bool VisualElement::hasRotation() const {
 }
 
 bool VisualElement::renderRotated(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey) {
-	int32 angle = static_cast<int32>(floor(_rotationAngle + 0.5)) % 360;
+	return renderTransformed(window, src, srcRect, destOrigin, hasTransColor, transColor, palette, cacheKey, _rotationAngle, _rotationAxisOffset, _rotationScaleX, _rotationScaleY);
+}
+
+// Draws the contents scaled from the element's top left corner, then rotated around the center of the scaled
+// element moved by the axis offset. Returns false if there is nothing to transform.
+bool VisualElement::renderTransformed(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey, double angleDegrees, const Common::Point &axisOffset, double scaleX, double scaleY) {
+	int32 angle = static_cast<int32>(floor(angleDegrees + 0.5)) % 360;
 	if (angle < 0)
 		angle += 360;
-	if (angle == 0)
+	const bool scaled = (scaleX != 1.0 || scaleY != 1.0);
+	if (angle == 0 && !scaled)
 		return false;
+	if (scaleX <= 0.0 || scaleY <= 0.0)
+		return true;	// Scaled to nothing
 
 	Graphics::ManagedSurface *dest = window->getSurface().get();
 	const Common::Point elementOrigin = _cachedAbsoluteOrigin;
-	const Common::Point pivot(elementOrigin.x + _rect.width() / 2 + _rotationAxisOffset.x, elementOrigin.y + _rect.height() / 2 + _rotationAxisOffset.y);
+	const Common::Point scaledOrigin(elementOrigin.x + static_cast<int32>(floor((destOrigin.x - elementOrigin.x) * scaleX + 0.5)),
+		elementOrigin.y + static_cast<int32>(floor((destOrigin.y - elementOrigin.y) * scaleY + 0.5)));
+	const int32 scaledW = MAX<int32>(1, static_cast<int32>(floor(srcRect.width() * scaleX + 0.5)));
+	const int32 scaledH = MAX<int32>(1, static_cast<int32>(floor(srcRect.height() * scaleY + 0.5)));
+	const Common::Point pivot(elementOrigin.x + static_cast<int32>(_rect.width() * scaleX) / 2 + axisOffset.x,
+		elementOrigin.y + static_cast<int32>(_rect.height() * scaleY) / 2 + axisOffset.y);
 	const uint32 keyColor = dest->format.ARGBToColor(255, 255, 1, 254);
 
-	if (!_rotationCache || _rotationCacheKey != cacheKey || _rotationCacheAngle != _rotationAngle || _rotationCacheAxisOffset != _rotationAxisOffset
+	if (!_rotationCache || _rotationCacheKey != cacheKey || _rotationCacheAngle != angleDegrees || _rotationCacheAxisOffset != axisOffset
+		|| _rotationCacheScaleX != scaleX || _rotationCacheScaleY != scaleY
 		|| _rotationCacheSource != &src || _rotationCacheTransColor != transColor || _rotationCache->format != dest->format) {
-		// Convert to ARGB with the transparent color as alpha, rotate around the pivot, then convert to the window format with a key color
+		// Convert to ARGB with the transparent color as alpha, scale, rotate around the pivot, then convert to the
+		// window format with a key color
 		const Graphics::PixelFormat argbFormat(4, 8, 8, 8, 8, 16, 8, 0, 24);
 		Graphics::Surface argb;
 		argb.create(srcRect.width(), srcRect.height(), argbFormat);
+		// The transparent color of a high color source is compared without its alpha, which images leave at 0
+		uint32 rgbMask = 0xffffffff;
+		if (src.format.bytesPerPixel != 1 && src.format.aBits() > 0)
+			rgbMask = ~(((1u << src.format.aBits()) - 1) << src.format.aShift);
 		for (int y = 0; y < srcRect.height(); y++) {
 			for (int x = 0; x < srcRect.width(); x++) {
 				uint32 raw = src.getPixel(srcRect.left + x, srcRect.top + y);
 				uint32 color = 0;
-				if (!hasTransColor || raw != transColor) {
+				if (!hasTransColor || (raw & rgbMask) != (transColor & rgbMask)) {
 					uint8 r, g, b;
 					if (src.format.bytesPerPixel == 1) {
 						r = palette[raw * 3 + 0];
@@ -9868,35 +9890,60 @@ bool VisualElement::renderRotated(Window *window, const Graphics::ManagedSurface
 			}
 		}
 
-		const Common::Point pivotInSource(pivot.x - destOrigin.x, pivot.y - destOrigin.y);
-		Graphics::TransformStruct transform(100, 100, static_cast<uint32>(angle), pivotInSource.x, pivotInSource.y);
-		Common::Point rotatedPivot;
-		Graphics::TransformTools::newRect(Common::Rect(srcRect.width(), srcRect.height()), transform, &rotatedPivot);
-		Graphics::Surface *rotated = argb.rotoscale(transform, false);
-		argb.free();
+		Graphics::Surface *result = nullptr;
+		if (scaled) {
+			result = argb.scale(scaledW, scaledH, false);
+			argb.free();
+		} else {
+			result = new Graphics::Surface();
+			*result = argb;	// Takes over the pixels
+		}
 
-		Common::SharedPtr<Graphics::ManagedSurface> converted(new Graphics::ManagedSurface(rotated->w, rotated->h, dest->format));
-		for (int y = 0; y < rotated->h; y++) {
-			for (int x = 0; x < rotated->w; x++) {
+		Common::Point offset(0, 0);	// Position of the result relative to the pivot
+		if (angle != 0) {
+			const Common::Point pivotInSource(pivot.x - scaledOrigin.x, pivot.y - scaledOrigin.y);
+			Graphics::TransformStruct transform(100, 100, static_cast<uint32>(angle), pivotInSource.x, pivotInSource.y);
+			Common::Point rotatedPivot;
+			Graphics::TransformTools::newRect(Common::Rect(result->w, result->h), transform, &rotatedPivot);
+			Graphics::Surface *rotated = result->rotoscale(transform, false);
+			result->free();
+			delete result;
+			result = rotated;
+			offset = Common::Point(-rotatedPivot.x, -rotatedPivot.y);
+		} else {
+			offset = Common::Point(scaledOrigin.x - pivot.x, scaledOrigin.y - pivot.y);
+		}
+
+		Common::SharedPtr<Graphics::ManagedSurface> converted(new Graphics::ManagedSurface(result->w, result->h, dest->format));
+		for (int y = 0; y < result->h; y++) {
+			for (int x = 0; x < result->w; x++) {
 				uint8 a, r, g, b;
-				argbFormat.colorToARGB(rotated->getPixel(x, y), a, r, g, b);
+				argbFormat.colorToARGB(result->getPixel(x, y), a, r, g, b);
 				converted->setPixel(x, y, a >= 128 ? dest->format.ARGBToColor(255, r, g, b) : keyColor);
 			}
 		}
-		rotated->free();
-		delete rotated;
+		result->free();
+		delete result;
 
 		_rotationCache = converted;
-		_rotationCacheOffset = Common::Point(-rotatedPivot.x, -rotatedPivot.y);
+		_rotationCacheOffset = offset;
 		_rotationCacheKey = cacheKey;
-		_rotationCacheAngle = _rotationAngle;
-		_rotationCacheAxisOffset = _rotationAxisOffset;
+		_rotationCacheAngle = angleDegrees;
+		_rotationCacheAxisOffset = axisOffset;
+		_rotationCacheScaleX = scaleX;
+		_rotationCacheScaleY = scaleY;
 		_rotationCacheSource = &src;
 		_rotationCacheTransColor = transColor;
 	}
 
+	// Clip to the window here: transBlitFrom would stretch the source into a clipped destination
 	const Common::Point topLeft(pivot.x + _rotationCacheOffset.x, pivot.y + _rotationCacheOffset.y);
-	dest->transBlitFrom(*_rotationCache, Common::Rect(_rotationCache->w, _rotationCache->h), Common::Rect(topLeft.x, topLeft.y, topLeft.x + _rotationCache->w, topLeft.y + _rotationCache->h), keyColor);
+	Common::Rect destRect(topLeft.x, topLeft.y, topLeft.x + _rotationCache->w, topLeft.y + _rotationCache->h);
+	Common::Rect clipped = destRect.findIntersectingRect(Common::Rect(dest->w, dest->h));
+	if (clipped.isEmpty())
+		return true;
+	Common::Rect srcRectClipped(clipped.left - destRect.left, clipped.top - destRect.top, clipped.right - destRect.left, clipped.bottom - destRect.top);
+	dest->transBlitFrom(*_rotationCache, srcRectClipped, clipped, keyColor);
 	return true;
 }
 

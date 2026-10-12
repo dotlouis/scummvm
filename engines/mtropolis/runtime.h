@@ -2928,7 +2928,7 @@ public:
 
 	// Rotation set by a rotation plug-in (Thereware Rotator): the contents are drawn rotated by angle degrees
 	// around the element center moved by axisOffset.
-	void setRotation(double angle, const Common::Point &axisOffset);
+	void setRotation(double angle, const Common::Point &axisOffset, double scaleX = 1.0, double scaleY = 1.0);
 	bool hasRotation() const;
 
 #ifdef MTROPOLIS_DEBUG_ENABLE
@@ -2945,6 +2945,7 @@ protected:
 	// destOrigin is where the top-left of srcRect goes without rotation. Pixels equal to transColor are
 	// transparent if hasTransColor. palette is used for 8-bit sources. cacheKey identifies the source contents.
 	bool renderRotated(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey);
+	bool renderTransformed(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey, double angleDegrees, const Common::Point &axisOffset, double scaleX, double scaleY);
 
 	// Write proxy for "asset", which only accepts the "preload" hint
 	struct AssetWriteProxyInterface {
@@ -3037,11 +3038,15 @@ protected:
 	bool _hasRotation;
 	double _rotationAngle;
 	Common::Point _rotationAxisOffset;
+	double _rotationScaleX;	// Scale of the drawn contents, from the element's top left corner
+	double _rotationScaleY;
 	Common::SharedPtr<Graphics::ManagedSurface> _rotationCache;	// Rotated contents in the window format, keyed by _rotationCacheKey
 	Common::Point _rotationCacheOffset;	// Position of the cached surface relative to the rotation pivot
 	uint32 _rotationCacheKey;
 	double _rotationCacheAngle;
 	Common::Point _rotationCacheAxisOffset;
+	double _rotationCacheScaleX;
+	double _rotationCacheScaleY;
 	const void *_rotationCacheSource;
 	uint32 _rotationCacheTransColor;
 };

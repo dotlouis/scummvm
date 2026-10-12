@@ -101,6 +101,8 @@ private:
 
 	MiniscriptInstructionOutcome scriptSetSize(MiniscriptThread *thread, const DynamicValue &value);
 	MiniscriptInstructionOutcome scriptWriteRefSizeAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib);
+	MiniscriptInstructionOutcome scriptSetSizeX(MiniscriptThread *thread, const DynamicValue &value);
+	MiniscriptInstructionOutcome scriptSetSizeY(MiniscriptThread *thread, const DynamicValue &value);
 	MiniscriptInstructionOutcome scriptSetAngle(MiniscriptThread *thread, const DynamicValue &value);
 	MiniscriptInstructionOutcome scriptSetAxisOffset(MiniscriptThread *thread, const DynamicValue &value);
 	MiniscriptInstructionOutcome scriptSetAxisOffsetX(MiniscriptThread *thread, const DynamicValue &value);
@@ -113,6 +115,8 @@ private:
 	bool _haveSize;
 	int32 _sizeX;
 	int32 _sizeY;
+	int32 _initialSizeX;	// The element size when the size was first used: the size of the unscaled image
+	int32 _initialSizeY;
 
 	// Rotation angle in degrees, and offset of the rotation axis from the element center
 	double _angle;

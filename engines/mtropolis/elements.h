@@ -261,6 +261,11 @@ public:
 #endif
 
 private:
+	bool renderFrameTransformed(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey);
+	void getSizeScale(double &scaleX, double &scaleY) const;
+	Common::Point getRotatorCentering() const;
+
+	Common::Point _loadedSize;	// Element size in the project, see getSizeScale
 	MToonElement(const MToonElement &other);
 
 	struct MToonConsumeCommandCoroutine {
