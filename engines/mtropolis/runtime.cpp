@@ -5341,6 +5341,10 @@ void Runtime::executeLowLevelSceneStateTransition(const LowLevelSceneStateTransi
 	case LowLevelSceneStateTransitionAction::kLoad:
 		loadScene(action.getScene());
 
+		// Default visibility only leaves alone the elements that scripts showed or hid since the scene started. The
+		// scene element itself stays loaded between visits, and hiding the scene when it was left marked it too.
+		recursiveClearVisibilityChangedByScript(action.getScene().get());
+
 		// Refresh play time so anything time-based doesn't skip ahead
 		refreshPlayTime();
 		break;
@@ -5362,7 +5366,6 @@ void Runtime::executeLowLevelSceneStateTransition(const LowLevelSceneStateTransi
 		break;
 	case LowLevelSceneStateTransitionAction::kHideAllElements:
 		executeSceneChangeRecursiveVisibilityChange(action.getScene().get(), false);
-		recursiveClearVisibilityChangedByScript(action.getScene().get());
 		break;
 	default:
 		assert(false);
