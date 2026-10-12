@@ -398,6 +398,8 @@ private:
 	uint32 _assetID;
 
 	Common::String _text;
+	Common::String _calculatedFieldsSource;	// The text with its <variable> fields, see updateCalculatedFields
+	bool _calculatedFieldsPending;	// Fields not shown yet: they are filled in when the label is first drawn
 	uint16 _macFontID;
 	Common::String _fontFamilyName;
 	uint _size;

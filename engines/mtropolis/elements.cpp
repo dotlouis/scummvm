@@ -2100,12 +2100,13 @@ MiniscriptInstructionOutcome MToonElement::scriptSetRate(MiniscriptThread *threa
 
 TextLabelElement::TextLabelElement()
 	: _cacheBitmap(false), _needsRender(false), _isBitmap(true), _assetID(0),
-	  _macFontID(0), _size(12), _alignment(kTextAlignmentLeft), _editReplacesText(false) {
+	  _calculatedFieldsPending(false), _macFontID(0), _size(12), _alignment(kTextAlignmentLeft), _editReplacesText(false) {
 }
 
 TextLabelElement::TextLabelElement(const TextLabelElement &other)
 	: VisualElement(other), _cacheBitmap(other._cacheBitmap), _needsRender(other._needsRender), _isBitmap(other._isBitmap)
-	, _assetID(other._assetID), _text(other._text), _macFontID(other._macFontID), _fontFamilyName(other._fontFamilyName)
+	, _assetID(other._assetID), _text(other._text), _calculatedFieldsSource(other._calculatedFieldsSource)
+	, _calculatedFieldsPending(other._calculatedFieldsPending), _macFontID(other._macFontID), _fontFamilyName(other._fontFamilyName)
 	, _size(other._size), _alignment(other._alignment), _styleFlags(other._styleFlags), _macFormattingSpans(other._macFormattingSpans)
 	, _editReplacesText(false), _renderedText(nullptr) {
 
@@ -2214,6 +2215,8 @@ void TextLabelElement::activate() {
 		_isBitmap = false;
 		_text = textAsset->getString();
 		_macFormattingSpans = textAsset->getMacFormattingSpans();
+		_calculatedFieldsSource = _text;
+		_calculatedFieldsPending = true;
 	}
 }
 
@@ -2258,6 +2261,7 @@ void TextLabelElement::onKeyboardEvent(Runtime *runtime, const KeyboardInputEven
 			_text.deleteLastChar();
 
 		_editReplacesText = false;
+		_calculatedFieldsSource = _text;
 		onTextChanged();
 		return;
 	}
@@ -2278,30 +2282,36 @@ void TextLabelElement::onKeyboardEvent(Runtime *runtime, const KeyboardInputEven
 		_text += encoded;
 
 	_editReplacesText = false;
+	_calculatedFieldsSource = _text;
 	onTextChanged();
 }
 
+// Fills the <variable> fields of the text with the values of the variables of those names, looked up from the label
+// outward. The fields are kept in _calculatedFieldsSource, so the text can be updated again when the values change.
+// Labels show their fields filled in from the start: Uncle Albert's Fabulous Voyage never sends Update Calculated
+// Fields to some of them (the "<texte_trad>" captions of the photo frames).
 void TextLabelElement::updateCalculatedFields() {
+	_calculatedFieldsPending = false;
 	if (_isBitmap)
 		return;
 
+	const Common::String &source = _calculatedFieldsSource;
 	Common::String newText;
-	bool changed = false;
 
 	size_t pos = 0;
-	while (pos < _text.size()) {
-		size_t fieldStart = _text.find('<', pos);
+	while (pos < source.size()) {
+		size_t fieldStart = source.find('<', pos);
 		if (fieldStart == Common::String::npos)
 			break;
 
-		size_t fieldEnd = _text.find('>', fieldStart + 1);
+		size_t fieldEnd = source.find('>', fieldStart + 1);
 		if (fieldEnd == Common::String::npos)
 			break;
 
-		newText += _text.substr(pos, fieldStart - pos);
+		newText += source.substr(pos, fieldStart - pos);
 		pos = fieldEnd + 1;
 
-		Common::String varName = _text.substr(fieldStart + 1, fieldEnd - fieldStart - 1);
+		Common::String varName = source.substr(fieldStart + 1, fieldEnd - fieldStart - 1);
 		Common::String formatted;
 		bool resolved = false;
 
@@ -2336,17 +2346,16 @@ void TextLabelElement::updateCalculatedFields() {
 			}
 		}
 
-		if (resolved) {
+		if (resolved)
 			newText += formatted;
-			changed = true;
-		} else
-			newText += _text.substr(fieldStart, pos - fieldStart);
+		else
+			newText += source.substr(fieldStart, pos - fieldStart);
 	}
 
-	if (!changed)
+	newText += source.substr(pos);
+	if (newText == _text)
 		return;
 
-	newText += _text.substr(pos);
 	_text = newText;
 	_editReplacesText = (_keyboardSignaller != nullptr);
 	onTextChanged();
@@ -2374,6 +2383,9 @@ void TextLabelElement::onTextChanged() {
 void TextLabelElement::render(Window *window) {
 	if (!_visible)
 		return;
+
+	if (_calculatedFieldsPending)
+		updateCalculatedFields();
 
 	int renderWidth = _rect.width();
 	int renderHeight = _rect.height();
@@ -2587,6 +2599,8 @@ MiniscriptInstructionOutcome TextLabelElement::scriptSetText(MiniscriptThread *t
 	}
 
 	_text = value.getString();
+	_calculatedFieldsSource = _text;
+	_calculatedFieldsPending = false;
 	_needsRender = true;
 	_isBitmap = false;
 	_contentsDirty = true;
@@ -2618,6 +2632,8 @@ MiniscriptInstructionOutcome TextLabelElement::scriptSetLine(MiniscriptThread *t
 		_text += derefValue.getString();
 	}
 
+	_calculatedFieldsSource = _text;
+	_calculatedFieldsPending = false;
 	_needsRender = true;
 	_isBitmap = false;
 	_contentsDirty = true;
