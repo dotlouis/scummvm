@@ -1,0 +1,48 @@
+From e5a57fabbc794d2d3ebf8417b8341e27c43f12ec Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 23:59:44 +0200
+Subject: [PATCH 45/46] SDL: Drop duplicated key down events in the Emscripten
+ build
+
+In the browser, SDL 3 can receive the same key event several times (six
+times in Chrome with the web build) and reports the copies as key
+repeats with the same timestamp. Every key press was then typed several
+times, and keyboard messengers that react to repeats fired as often.
+
+Drop key down events that repeat the previous one with the same
+timestamp and scancode. A real key repeat, when a key is held down, has
+a later timestamp and still goes through.
+
+Seen in Uncle Albert's Fabulous Voyage (mTropolis): typing "louis" on the
+name screen gave "llllllooooooouuuuuuiiiiiissssss".
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ backends/events/sdl/sdl3-events.cpp | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/backends/events/sdl/sdl3-events.cpp b/backends/events/sdl/sdl3-events.cpp
+index cb344b2302..5d6ce6c3e2 100644
+--- a/backends/events/sdl/sdl3-events.cpp
++++ b/backends/events/sdl/sdl3-events.cpp
+@@ -844,6 +844,17 @@ bool SdlEventSource::dispatchSDLEvent(SDL_Event &ev, Common::Event &event) {
+ 
+ 
+ bool SdlEventSource::handleKeyDown(SDL_Event &ev, Common::Event &event) {
++#ifdef __EMSCRIPTEN__
++	// In the browser, SDL can get the same key event several times (6 times in Chrome with the ScummVM web build)
++	// and reports the copies as key repeats with the same timestamp. A real repeat, when a key is held down, has a
++	// later timestamp. Drop the copies, or each key press is typed several times.
++	static Uint64 lastKeyDownTimestamp = 0;
++	static SDL_Scancode lastKeyDownScancode = SDL_SCANCODE_UNKNOWN;
++	if (ev.key.repeat && ev.key.timestamp == lastKeyDownTimestamp && ev.key.scancode == lastKeyDownScancode)
++		return false;
++	lastKeyDownTimestamp = ev.key.timestamp;
++	lastKeyDownScancode = ev.key.scancode;
++#endif
+ 
+ 	SDLModToOSystemKeyFlags(SDL_GetModState(), event);
+ 
+-- 
+2.47.3
+
