@@ -1,0 +1,135 @@
+From a62cfbbe680abc852976bda19173fd0496faabc4 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Mon, 12 Oct 2026 19:15:42 +0200
+Subject: [PATCH 42/43] MTROPOLIS: Implement the cursorelement and
+ cursorhotspot attributes
+
+Writes to the world manager "cursorelement" and "cursorhotspot"
+attributes were ignored. The cursor element now follows the mouse with
+its hotspot under the mouse, and replaces the system cursor, like with
+the "cursor" attribute. Setting it to something that isn't a visual
+element goes back to the system cursor instead of stopping the script.
+
+Uncle Albert's Fabulous Voyage places its tool cursors (camera,
+magnifier, tape recorder...) once and relies on this to move them. Its
+own fallback only moves them over the page, so a tool stayed stuck over
+the bottom margin (on the whistle) while the system cursor moved on.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 48 ++++++++++++++++++++++++++++++-----
+ engines/mtropolis/runtime.h   |  4 +++
+ 2 files changed, 46 insertions(+), 6 deletions(-)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 4bddd75b60..84e756dc7d 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -3090,9 +3090,11 @@ MiniscriptInstructionOutcome WorldManagerInterface::writeRefAttribute(Miniscript
+ 	} else if (attrib == "cursor") {
+ 		DynamicValueWriteFuncHelper<WorldManagerInterface, &WorldManagerInterface::setCursor, true>::create(this, result);
+ 		return kMiniscriptInstructionOutcomeContinue;
+-	} else if (attrib == "cursorelement" || attrib == "cursorhotspot") {
+-		// Not implemented, the element isn't used as the cursor
+-		DynamicValueWriteDiscardHelper::create(result);
++	} else if (attrib == "cursorelement") {
++		DynamicValueWriteFuncHelper<WorldManagerInterface, &WorldManagerInterface::setCursorElement, true>::create(this, result);
++		return kMiniscriptInstructionOutcomeContinue;
++	} else if (attrib == "cursorhotspot") {
++		DynamicValueWriteFuncHelper<WorldManagerInterface, &WorldManagerInterface::setCursorHotspot, true>::create(this, result);
+ 		return kMiniscriptInstructionOutcomeContinue;
+ 	}
+ 	return RuntimeObject::writeRefAttribute(thread, result, attrib);
+@@ -3156,6 +3158,35 @@ MiniscriptInstructionOutcome WorldManagerInterface::setWinSndBufferSize(Miniscri
+ 	return kMiniscriptInstructionOutcomeContinue;
+ }
+ 
++// The cursor element follows the mouse, with its cursor hotspot under the mouse, and replaces the system cursor.
++// Uncle Albert's Fabulous Voyage uses it for its tool cursors (camera viewfinder, tape recorder, magnifier...):
++// its scripts only place the element once, the player moves it afterwards.
++MiniscriptInstructionOutcome WorldManagerInterface::setCursorElement(MiniscriptThread *thread, const DynamicValue &value) {
++	if (value.getType() == DynamicValueTypes::kObject) {
++		Common::SharedPtr<RuntimeObject> obj = value.getObject().object.lock();
++		if (obj && obj->isElement() && static_cast<Element *>(obj.get())->isVisual()) {
++			thread->getRuntime()->setCursorElement(obj.staticCast<VisualElement>());
++			return kMiniscriptInstructionOutcomeContinue;
++		}
++	}
++
++	if (value.getType() != DynamicValueTypes::kNull)
++		warning("Cursor element set to something that isn't a visual element, using the system cursor");
++
++	thread->getRuntime()->setCursorElement(Common::WeakPtr<VisualElement>());
++	return kMiniscriptInstructionOutcomeContinue;
++}
++
++MiniscriptInstructionOutcome WorldManagerInterface::setCursorHotspot(MiniscriptThread *thread, const DynamicValue &value) {
++	if (value.getType() != DynamicValueTypes::kPoint) {
++		thread->error("Cursor hotspot set to something that isn't a point");
++		return kMiniscriptInstructionOutcomeFailed;
++	}
++
++	thread->getRuntime()->setCursorElementHotspot(value.getPoint());
++	return kMiniscriptInstructionOutcomeContinue;
++}
++
+ MiniscriptInstructionOutcome WorldManagerInterface::setCursor(MiniscriptThread *thread, const DynamicValue &value) {
+ 	switch (value.getType())
+ 	{
+@@ -7110,16 +7141,21 @@ void Runtime::setCursorElement(const Common::WeakPtr<VisualElement> &element) {
+ 	updateMainWindowCursor();
+ }
+ 
++void Runtime::setCursorElementHotspot(const Common::Point &hotspot) {
++	_cursorElementHotspot = hotspot;
++}
++
+ void Runtime::updateCursorElementPosition() {
+ 	Common::SharedPtr<VisualElement> element = _elementTrackedToCursor.lock();
+ 	if (!element)
+ 		return;
+ 
+ 	Common::Point elementPos = element->getGlobalPosition();
+-	if (elementPos != _cachedMousePosition) {
++	Common::Point targetPos(_cachedMousePosition.x - _cursorElementHotspot.x, _cachedMousePosition.y - _cursorElementHotspot.y);
++	if (elementPos != targetPos) {
+ 		VisualElement::OffsetTranslateTaskData *taskData = _vthread->pushTask("VisualElement::offsetTranslateTask", element.get(), &VisualElement::offsetTranslateTask);
+-		taskData->dx = _cachedMousePosition.x - elementPos.x;
+-		taskData->dy = _cachedMousePosition.y - elementPos.y;
++		taskData->dx = targetPos.x - elementPos.x;
++		taskData->dy = targetPos.y - elementPos.y;
+ 	}
+ }
+ 
+diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
+index 9b9d9c37b8..af28beaba8 100644
+--- a/engines/mtropolis/runtime.h
++++ b/engines/mtropolis/runtime.h
+@@ -1691,6 +1691,7 @@ public:
+ 	void checkCollisions(ICollider *optRestrictToCollider);
+ 
+ 	void setCursorElement(const Common::WeakPtr<VisualElement> &element);
++	void setCursorElementHotspot(const Common::Point &hotspot);
+ 	void updateCursorElementPosition();
+ 
+ 	void addBoundaryDetector(IBoundaryDetector *boundaryDetector);
+@@ -2017,6 +2018,7 @@ private:
+ 	uint32 _collisionCheckTime;
+ 
+ 	Common::WeakPtr<VisualElement> _elementTrackedToCursor;
++	Common::Point _cursorElementHotspot;	// Point of the cursor element that is kept under the mouse
+ 	//uint32 _elementCursorUpdateTime;
+ 
+ 	Common::Array<IPostEffect *> _postEffects;
+@@ -2144,6 +2146,8 @@ private:
+ 	MiniscriptInstructionOutcome setAutoResetCursor(MiniscriptThread *thread, const DynamicValue &value);
+ 	MiniscriptInstructionOutcome setWinSndBufferSize(MiniscriptThread *thread, const DynamicValue &value);
+ 	MiniscriptInstructionOutcome setCursor(MiniscriptThread *thread, const DynamicValue &value);
++	MiniscriptInstructionOutcome setCursorElement(MiniscriptThread *thread, const DynamicValue &value);
++	MiniscriptInstructionOutcome setCursorHotspot(MiniscriptThread *thread, const DynamicValue &value);
+ 
+ 	int32 _opInt;
+ 	bool _gameMode;
+-- 
+2.47.3
+

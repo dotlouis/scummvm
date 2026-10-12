@@ -1,7 +1,7 @@
-From 2c4f15fd631a743595a2ad89005800fec2c0f2d7 Mon Sep 17 00:00:00 2001
+From acd659b98fbad108391a3eed372594c57770d6bb Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 16:38:31 -0700
-Subject: [PATCH 42/42] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
+Subject: [PATCH 43/43] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
  for upstream)
 
 Local reverse-engineering tools, not meant to be submitted:
@@ -2676,10 +2676,10 @@ index 558f400119..d4585085d4 100644
  }
  
 diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
-index 4bddd75b60..f1f1eb7eae 100644
+index 84e756dc7d..5992d656e2 100644
 --- a/engines/mtropolis/runtime.cpp
 +++ b/engines/mtropolis/runtime.cpp
-@@ -4093,6 +4093,34 @@ MiniscriptInstructionOutcome Structural::scriptSetLoop(MiniscriptThread *thread,
+@@ -4124,6 +4124,34 @@ MiniscriptInstructionOutcome Structural::scriptSetLoop(MiniscriptThread *thread,
  }
  
  MiniscriptInstructionOutcome Structural::scriptSetDebug(MiniscriptThread *thread, const DynamicValue &value) {
@@ -2714,7 +2714,7 @@ index 4bddd75b60..f1f1eb7eae 100644
  	return kMiniscriptInstructionOutcomeContinue;
  }
  
-@@ -4251,6 +4279,55 @@ SceneTransitionEffect::SceneTransitionEffect()
+@@ -4282,6 +4310,55 @@ SceneTransitionEffect::SceneTransitionEffect()
  	: _duration(100000), _steps(64), _transitionType(SceneTransitionTypes::kNone), _transitionDirection(SceneTransitionDirections::kUp) {
  }
  
@@ -2770,7 +2770,7 @@ index 4bddd75b60..f1f1eb7eae 100644
  MessageDispatch::MessageDispatch(const Common::SharedPtr<MessageProperties> &msgProps, Structural *root, bool cascade, bool relay, bool couldBeCommand)
  	: _cascade(cascade), _relay(relay), _msg(msgProps), _isCommand(false), _rootType(RootType::Structural) {
  	if (couldBeCommand && EventIDs::isCommand(msgProps->getEvent().eventType)) {
-@@ -4259,6 +4336,7 @@ MessageDispatch::MessageDispatch(const Common::SharedPtr<MessageProperties> &msg
+@@ -4290,6 +4367,7 @@ MessageDispatch::MessageDispatch(const Common::SharedPtr<MessageProperties> &msg
  	}
  
  	_root = root->getSelfReference();
@@ -2778,7 +2778,7 @@ index 4bddd75b60..f1f1eb7eae 100644
  }
  
  MessageDispatch::MessageDispatch(const Common::SharedPtr<MessageProperties> &msgProps, Modifier *root, bool cascade, bool relay, bool couldBeCommand)
-@@ -4267,6 +4345,7 @@ MessageDispatch::MessageDispatch(const Common::SharedPtr<MessageProperties> &msg
+@@ -4298,6 +4376,7 @@ MessageDispatch::MessageDispatch(const Common::SharedPtr<MessageProperties> &msg
  	// Apparently if a command message is sent to a modifier, it's handled as a message.
  	// SPQR depends on this to send "Element Select" messages to pick the palette.
  	_root = root->getSelfReference();
@@ -2786,7 +2786,7 @@ index 4bddd75b60..f1f1eb7eae 100644
  }
  
  const Common::SharedPtr<MessageProperties> &MessageDispatch::getMsg() const {
-@@ -5983,12 +6062,71 @@ void Runtime::recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLa
+@@ -6014,12 +6093,71 @@ void Runtime::recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLa
  		recursiveFindMouseCollision(bestResult, bestLayer, bestStackHeight, bestDirect, child.get(), stackHeight, childRelativeX, childRelativeY, testType);
  }
  
@@ -2858,7 +2858,7 @@ index 4bddd75b60..f1f1eb7eae 100644
  void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
  	assert(scene->getSceneLoadState() != Structural::SceneLoadState::kNotAScene);
  
-@@ -6008,6 +6146,8 @@ void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
+@@ -6039,6 +6177,8 @@ void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
  			debug(1, "Scene loaded OK, materializing objects...");
  			scene->materializeDescendents(this, subsection->getSceneLoadMaterializeScope());
  			debug(1, "Scene materialized OK");
@@ -2867,7 +2867,7 @@ index 4bddd75b60..f1f1eb7eae 100644
  		}
  
  		recursiveActivateStructural(scene.get());
-@@ -6496,6 +6636,7 @@ VThreadState Runtime::updateMouseStateTask(const UpdateMouseStateTaskData &data)
+@@ -6527,6 +6667,7 @@ VThreadState Runtime::updateMouseStateTask(const UpdateMouseStateTaskData &data)
  			recursiveFindMouseCollision(tracked, bestSceneStack, bestLayer, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, _cachedMousePosition.x, _cachedMousePosition.y, kMouseInteractivityTestMouseClick);
  		}
  
@@ -2876,10 +2876,10 @@ index 4bddd75b60..f1f1eb7eae 100644
  			_mouseTrackingObject = tracked->getSelfReference().staticCast<Structural>();
  			_mouseTrackingDragStart = _cachedMousePosition;
 diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
-index 9b9d9c37b8..385463f2a8 100644
+index af28beaba8..19893b3a26 100644
 --- a/engines/mtropolis/runtime.h
 +++ b/engines/mtropolis/runtime.h
-@@ -1729,6 +1729,9 @@ public:
+@@ -1730,6 +1730,9 @@ public:
  
  #ifdef MTROPOLIS_DEBUG_ENABLE
  	void debugSetEnabled(bool enabled);
