@@ -844,6 +844,17 @@ bool SdlEventSource::dispatchSDLEvent(SDL_Event &ev, Common::Event &event) {
 
 
 bool SdlEventSource::handleKeyDown(SDL_Event &ev, Common::Event &event) {
+#ifdef __EMSCRIPTEN__
+	// In the browser, SDL can get the same key event several times (6 times in Chrome with the ScummVM web build)
+	// and reports the copies as key repeats with the same timestamp. A real repeat, when a key is held down, has a
+	// later timestamp. Drop the copies, or each key press is typed several times.
+	static Uint64 lastKeyDownTimestamp = 0;
+	static SDL_Scancode lastKeyDownScancode = SDL_SCANCODE_UNKNOWN;
+	if (ev.key.repeat && ev.key.timestamp == lastKeyDownTimestamp && ev.key.scancode == lastKeyDownScancode)
+		return false;
+	lastKeyDownTimestamp = ev.key.timestamp;
+	lastKeyDownScancode = ev.key.scancode;
+#endif
 
 	SDLModToOSystemKeyFlags(SDL_GetModState(), event);
 
