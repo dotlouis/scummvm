@@ -1,4 +1,4 @@
-From eb20efcfb158c32b04cec55702f6434018c02750 Mon Sep 17 00:00:00 2001
+From 0e7a79ef686f284aba8bdb3b3226a6fb7f38afc8 Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 16:38:31 -0700
 Subject: [PATCH 44/44] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
@@ -2676,7 +2676,7 @@ index 558f400119..d4585085d4 100644
  }
  
 diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
-index db92960827..9e9f0d5a27 100644
+index 052b894131..0d006786d4 100644
 --- a/engines/mtropolis/runtime.cpp
 +++ b/engines/mtropolis/runtime.cpp
 @@ -4124,6 +4124,34 @@ MiniscriptInstructionOutcome Structural::scriptSetLoop(MiniscriptThread *thread,
@@ -2786,8 +2786,8 @@ index db92960827..9e9f0d5a27 100644
  }
  
  const Common::SharedPtr<MessageProperties> &MessageDispatch::getMsg() const {
-@@ -6014,12 +6093,71 @@ void Runtime::recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLa
- 		recursiveFindMouseCollision(bestResult, bestLayer, bestStackHeight, bestDirect, child.get(), stackHeight, childRelativeX, childRelativeY, testType);
+@@ -6018,12 +6097,71 @@ void Runtime::recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLa
+ 		recursiveFindMouseCollision(bestResult, bestLayer, bestStackHeight, bestDirect, child.get(), stackHeight, childRelativeX, childRelativeY, testType, cursorElement);
  }
  
 +#ifdef MTROPOLIS_DEBUG_ENABLE
@@ -2800,7 +2800,7 @@ index db92960827..9e9f0d5a27 100644
 +
 +	for (size_t ri = 0; ri < _sceneStack.size(); ri++) {
 +		const SceneStackEntry &sceneStackEntry = _sceneStack[_sceneStack.size() - 1 - ri];
-+		recursiveFindMouseCollision(tracked, bestLayer, bestStackHeight, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, x, y, kMouseInteractivityTestMouseClick);
++		recursiveFindMouseCollision(tracked, bestLayer, bestStackHeight, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, x, y, kMouseInteractivityTestMouseClick, _elementTrackedToCursor.lock().get());
 +	}
 +	return tracked;
 +}
@@ -2858,7 +2858,7 @@ index db92960827..9e9f0d5a27 100644
  void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
  	assert(scene->getSceneLoadState() != Structural::SceneLoadState::kNotAScene);
  
-@@ -6039,6 +6177,8 @@ void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
+@@ -6043,6 +6181,8 @@ void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
  			debug(1, "Scene loaded OK, materializing objects...");
  			scene->materializeDescendents(this, subsection->getSceneLoadMaterializeScope());
  			debug(1, "Scene materialized OK");
@@ -2867,8 +2867,8 @@ index db92960827..9e9f0d5a27 100644
  		}
  
  		recursiveActivateStructural(scene.get());
-@@ -6527,6 +6667,7 @@ VThreadState Runtime::updateMouseStateTask(const UpdateMouseStateTaskData &data)
- 			recursiveFindMouseCollision(tracked, bestSceneStack, bestLayer, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, _cachedMousePosition.x, _cachedMousePosition.y, kMouseInteractivityTestMouseClick);
+@@ -6531,6 +6671,7 @@ VThreadState Runtime::updateMouseStateTask(const UpdateMouseStateTaskData &data)
+ 			recursiveFindMouseCollision(tracked, bestSceneStack, bestLayer, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, _cachedMousePosition.x, _cachedMousePosition.y, kMouseInteractivityTestMouseClick, _elementTrackedToCursor.lock().get());
  		}
  
 +		debug(3, "MOUSEDOWN at (%d,%d) target '%s' %x", (int)_cachedMousePosition.x, (int)_cachedMousePosition.y, tracked ? tracked->getName().c_str() : "", tracked ? tracked->getStaticGUID() : 0); // DEBUG-TRACE
@@ -2876,7 +2876,7 @@ index db92960827..9e9f0d5a27 100644
  			_mouseTrackingObject = tracked->getSelfReference().staticCast<Structural>();
  			_mouseTrackingDragStart = _cachedMousePosition;
 diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
-index af28beaba8..19893b3a26 100644
+index 177275bc82..0a30f91e1a 100644
 --- a/engines/mtropolis/runtime.h
 +++ b/engines/mtropolis/runtime.h
 @@ -1730,6 +1730,9 @@ public:

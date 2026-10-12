@@ -1,4 +1,4 @@
-From 02280687bb55135d8675466cab8b78f884250977 Mon Sep 17 00:00:00 2001
+From a0a22fe0d590c62f32acd24d7c5ac47cbe66955e Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Mon, 12 Oct 2026 19:33:10 +0200
 Subject: [PATCH 43/44] MTROPOLIS: Add a hack hiding object frames for Uncle
@@ -67,10 +67,10 @@ index 57752f6525..ede6f7bfe5 100644
  		HackSuites::addMTIQuirks(*_gameDescription, _runtime->getHacks());
  	} else if (_gameDescription->gameID == GID_UNIT) {
 diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
-index 84e756dc7d..db92960827 100644
+index 7582630a5b..052b894131 100644
 --- a/engines/mtropolis/runtime.cpp
 +++ b/engines/mtropolis/runtime.cpp
-@@ -10753,6 +10753,15 @@ MiniscriptInstructionOutcome Modifier::writeRefAttribute(MiniscriptThread *threa
+@@ -10757,6 +10757,15 @@ MiniscriptInstructionOutcome Modifier::writeRefAttribute(MiniscriptThread *threa
  		return kMiniscriptInstructionOutcomeContinue;
  	}
  
