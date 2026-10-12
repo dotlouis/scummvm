@@ -1,0 +1,58 @@
+From d8b40e06a041fa8fe3e15aef0b18729c78864397 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 04:07:00 -0700
+Subject: [PATCH 18/41] MTROPOLIS: Return a default value for list reads
+ outside the list
+
+Reading a list variable at an index outside of the list now gives the
+default value of the list content type instead of stopping the script.
+Uncle Albert's Fabulous Voyage reads index 0 of a list for every
+notebook animal, and the rest of the script must still run.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/plugin/standard.cpp | 28 ++++++++++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/engines/mtropolis/plugin/standard.cpp b/engines/mtropolis/plugin/standard.cpp
+index 4e4b178e750..576106e5eb4 100644
+--- a/engines/mtropolis/plugin/standard.cpp
++++ b/engines/mtropolis/plugin/standard.cpp
+@@ -1085,7 +1085,33 @@ bool ListVariableModifier::readAttributeIndexed(MiniscriptThread *thread, Dynami
+ 
+ 	if (attrib == "value") {
+ 		size_t realIndex = 0;
+-		return storage->_list->dynamicValueToIndex(realIndex, index) && storage->_list->getAtIndex(realIndex, result);
++		if (storage->_list->dynamicValueToIndex(realIndex, index) && storage->_list->getAtIndex(realIndex, result))
++			return true;
++
++		// Reading outside of the list gives a default value instead of stopping the script. Uncle Albert's
++		// Fabulous Voyage reads index 0 of a list for every notebook animal and relies on the rest
++		// of the script running.
++		switch (storage->_preferredContentType) {
++		case DynamicValueTypes::kString:
++			result.setString("");
++			break;
++		case DynamicValueTypes::kInteger:
++			result.setInt(0);
++			break;
++		case DynamicValueTypes::kFloat:
++			result.setFloat(0.0);
++			break;
++		case DynamicValueTypes::kBoolean:
++			result.setBool(false);
++			break;
++		case DynamicValueTypes::kPoint:
++			result.setPoint(Common::Point(0, 0));
++			break;
++		default:
++			result.clear();
++			break;
++		}
++		return true;
+ 	} else if (attrib == "delete") {
+ 		size_t realIndex = 0;
+ 		if (!storage->_list->dynamicValueToIndex(realIndex, index))
+-- 
+2.54.0 (Apple Git-157)
+

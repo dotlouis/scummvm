@@ -1,0 +1,726 @@
+From 3a81a77da5d1e0e790766ae137a21f76f1f76062 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 16:37:55 -0700
+Subject: [PATCH 04/41] MTROPOLIS: Implement Hoologic bitmap variable, capture,
+ display and scale
+
+Implement the Hoologic Bitmap Suite modifiers needed by Uncle Albert's
+Fabulous Voyage to draw and animate the pages of its notebook:
+
+- Bitmap Variable stores a bitmap. Its "object" attribute resolves to
+  the variable itself, and assigning one bitmap variable to another
+  copies the bitmap, which is how the game keeps copies of pages.
+- Capture Bitmap copies the screen area of its parent element into a
+  bitmap variable.
+- Display Bitmap draws the current contents of a bitmap variable in
+  place of its parent element, until its remove event.
+- Scale Bitmap resizes a bitmap variable to the point it receives.
+
+Visual elements get an optional display bitmap source that graphic and
+image elements draw instead of their own contents. The data fields of
+these modifiers are renamed after what they turned out to be.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/elements.cpp             |   6 +
+ engines/mtropolis/plugin/hoologic.cpp      | 235 +++++++++++++++++++--
+ engines/mtropolis/plugin/hoologic.h        |  64 +++++-
+ engines/mtropolis/plugin/hoologic_data.cpp |   6 +-
+ engines/mtropolis/plugin/hoologic_data.h   |  22 +-
+ engines/mtropolis/runtime.cpp              |  49 +++++
+ engines/mtropolis/runtime.h                |  19 ++
+ 7 files changed, 369 insertions(+), 32 deletions(-)
+
+diff --git a/engines/mtropolis/elements.cpp b/engines/mtropolis/elements.cpp
+index 6060606822e..356efde0100 100644
+--- a/engines/mtropolis/elements.cpp
++++ b/engines/mtropolis/elements.cpp
+@@ -80,6 +80,9 @@ MiniscriptInstructionOutcome GraphicElement::writeRefAttribute(MiniscriptThread
+ 
+ 
+ void GraphicElement::render(Window *window) {
++	if (_visible && renderDisplayBitmap(window))
++		return;
++
+ 	bool haveEffect = (_bottomRightBevelShading != 0 || _topLeftBevelShading != 0 || _interiorShading != 0);
+ 
+ 	if (!haveEffect) {
+@@ -1257,6 +1260,9 @@ void ImageElement::tryAutoSetName(Runtime *runtime, Project *project) {
+ }
+ 
+ void ImageElement::render(Window *window) {
++	if (renderDisplayBitmap(window))
++		return;
++
+ 	if (_cachedImage) {
+ 		VisualElementRenderProperties::InkMode inkMode = _renderProps.getInkMode();
+ 
+diff --git a/engines/mtropolis/plugin/hoologic.cpp b/engines/mtropolis/plugin/hoologic.cpp
+index 9f07c1252b8..4727ebe678c 100644
+--- a/engines/mtropolis/plugin/hoologic.cpp
++++ b/engines/mtropolis/plugin/hoologic.cpp
+@@ -19,6 +19,8 @@
+  *
+  */
+ 
++#include "graphics/managed_surface.h"
++
+ #include "mtropolis/plugin/hoologic.h"
+ #include "mtropolis/plugins.h"
+ 
+@@ -26,30 +28,87 @@ namespace MTropolis {
+ 
+ namespace Hoologic {
+ 
+-BitmapVariableModifier::BitmapVariableModifier() {
+-}
+-
+-BitmapVariableModifier::~BitmapVariableModifier() {
++BitmapVariableModifier::BitmapVariableModifier() : VariableModifier(Common::SharedPtr<VariableStorage>(new BitmapVariableStorage())) {
+ }
+ 
+ bool BitmapVariableModifier::load(const PlugInModifierLoaderContext &context, const Data::Hoologic::BitmapVariableModifier &data) {
+ 	return true;
+ }
+ 
+-bool BitmapVariableModifier::respondsToEvent(const Event &evt) const {
++bool BitmapVariableModifier::varSetValue(MiniscriptThread *thread, const DynamicValue &value) {
++	if (value.getType() == DynamicValueTypes::kNull) {
++		setBitmap(nullptr);
++		return true;
++	}
++
++	// Assigning a bitmap variable to another one copies the bitmap
++	if (value.getType() == DynamicValueTypes::kObject) {
++		Common::SharedPtr<RuntimeObject> obj = value.getObject().object.lock();
++		if (obj && obj->isModifier() && static_cast<Modifier *>(obj.get())->isVariable()) {
++			BitmapVariableStorage *otherStorage = dynamic_cast<BitmapVariableStorage *>(static_cast<VariableModifier *>(obj.get())->getStorage().get());
++			if (otherStorage) {
++				setBitmap(otherStorage->_bitmap);
++				return true;
++			}
++		}
++	}
++
+ 	return false;
+ }
+ 
+-VThreadState BitmapVariableModifier::consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
+-	return kVThreadReturn;
++void BitmapVariableModifier::varGetValue(DynamicValue &dest) const {
++	dest.setObject(getSelfReference());
++}
++
++bool BitmapVariableModifier::readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) {
++	// Scripts copy bitmaps with "set dest to source.object"
++	if (attrib == "object") {
++		result.setObject(getSelfReference());
++		return true;
++	}
++
++	const Common::SharedPtr<Graphics::ManagedSurface> &bitmap = getBitmap();
++	if (attrib == "width") {
++		result.setInt(bitmap ? bitmap->w : 0);
++		return true;
++	}
++	if (attrib == "height") {
++		result.setInt(bitmap ? bitmap->h : 0);
++		return true;
++	}
++
++	return VariableModifier::readAttribute(thread, result, attrib);
++}
++
++const Common::SharedPtr<Graphics::ManagedSurface> &BitmapVariableModifier::getBitmap() const {
++	return static_cast<const BitmapVariableStorage *>(getStorage().get())->_bitmap;
++}
++
++void BitmapVariableModifier::setBitmap(const Common::SharedPtr<Graphics::ManagedSurface> &bitmap) {
++	static_cast<BitmapVariableStorage *>(getStorage().get())->_bitmap = bitmap;
++}
++
++Common::SharedPtr<Graphics::ManagedSurface> BitmapVariableModifier::getDisplayBitmap() const {
++	return getBitmap();
+ }
+ 
+-void BitmapVariableModifier::disable(Runtime *runtime) {
++BitmapVariableModifier *BitmapVariableModifier::resolve(const VarReference &varRef) {
++	Common::SharedPtr<Modifier> modifier = varRef.resolution.lock();
++	if (!modifier)
++		return nullptr;
++
++	return dynamic_cast<BitmapVariableModifier *>(modifier.get());
+ }
+ 
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ void BitmapVariableModifier::debugInspect(IDebugInspectionReport *report) const {
+-	Modifier::debugInspect(report);
++	VariableModifier::debugInspect(report);
++
++	const Common::SharedPtr<Graphics::ManagedSurface> &bitmap = getBitmap();
++	if (bitmap)
++		report->declareDynamic("bitmap", Common::String::format("%ix%i", static_cast<int>(bitmap->w), static_cast<int>(bitmap->h)));
++	else
++		report->declareDynamic("bitmap", "None");
+ }
+ #endif
+ 
+@@ -61,6 +120,24 @@ const char *BitmapVariableModifier::getDefaultName() const {
+ 	return "Bitmap Variable Modifier"; // ???
+ }
+ 
++Common::SharedPtr<ModifierSaveLoad> BitmapVariableStorage::getSaveLoad(Runtime *runtime) {
++	return Common::SharedPtr<ModifierSaveLoad>(new SaveLoad());
++}
++
++Common::SharedPtr<VariableStorage> BitmapVariableStorage::clone() const {
++	return Common::SharedPtr<VariableStorage>(new BitmapVariableStorage(*this));
++}
++
++void BitmapVariableStorage::SaveLoad::commitLoad() const {
++}
++
++void BitmapVariableStorage::SaveLoad::saveInternal(Common::WriteStream *stream) const {
++}
++
++bool BitmapVariableStorage::SaveLoad::loadInternal(Common::ReadStream *stream, uint32 saveFileVersion) {
++	return true;
++}
++
+ CaptureBitmapModifier::CaptureBitmapModifier() {
+ }
+ 
+@@ -68,20 +145,68 @@ CaptureBitmapModifier::~CaptureBitmapModifier() {
+ }
+ 
+ bool CaptureBitmapModifier::load(const PlugInModifierLoaderContext &context, const Data::Hoologic::CaptureBitmapModifier &data) {
++	if (data.captureWhen.type != Data::PlugInTypeTaggedValue::kEvent || data.bitmapVar.type != Data::PlugInTypeTaggedValue::kVariableReference)
++		return false;
++
++	if (!_captureWhen.load(data.captureWhen.value.asEvent))
++		return false;
++
++	_bitmapVar = VarReference(data.bitmapVar.value.asVarRefGUID, "");
++
+ 	return true;
+ }
+ 
+ bool CaptureBitmapModifier::respondsToEvent(const Event &evt) const {
+-	return false;
++	return _captureWhen.respondsTo(evt);
+ }
+ 
+ VThreadState CaptureBitmapModifier::consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
++	if (!_captureWhen.respondsTo(msg->getEvent()))
++		return kVThreadReturn;
++
++	BitmapVariableModifier *bitmapVar = BitmapVariableModifier::resolve(_bitmapVar);
++	if (!bitmapVar) {
++		warning("Capture Bitmap modifier couldn't resolve its bitmap variable");
++		return kVThreadReturn;
++	}
++
++	Structural *owner = findStructuralOwner();
++	Common::SharedPtr<Window> window = runtime->getMainWindow().lock();
++	if (!owner || !owner->isElement() || !static_cast<Element *>(owner)->isVisual() || !window)
++		return kVThreadReturn;
++
++	// Capture what was last drawn on screen in the area of the parent element
++	VisualElement *element = static_cast<VisualElement *>(owner);
++	const Graphics::ManagedSurface &screen = *window->getSurface();
++
++	Common::Point origin = element->getGlobalPosition();
++	const Common::Rect &relRect = element->getRelativeRect();
++	Common::Rect captureRect(origin.x, origin.y, origin.x + relRect.width(), origin.y + relRect.height());
++	captureRect.clip(Common::Rect(screen.w, screen.h));
++
++	if (captureRect.isEmpty()) {
++		bitmapVar->setBitmap(nullptr);
++		return kVThreadReturn;
++	}
++
++	Common::SharedPtr<Graphics::ManagedSurface> bitmap(new Graphics::ManagedSurface(captureRect.width(), captureRect.height(), screen.format));
++	bitmap->blitFrom(screen, captureRect, Common::Point(0, 0));
++	bitmapVar->setBitmap(bitmap);
++
+ 	return kVThreadReturn;
+ }
+ 
+ void CaptureBitmapModifier::disable(Runtime *runtime) {
+ }
+ 
++void CaptureBitmapModifier::linkInternalReferences(ObjectLinkingScope *scope) {
++	_bitmapVar.linkInternalReferences(scope);
++}
++
++void CaptureBitmapModifier::visitInternalReferences(IStructuralReferenceVisitor *visitor) {
++	_bitmapVar.visitInternalReferences(visitor);
++}
++
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ void CaptureBitmapModifier::debugInspect(IDebugInspectionReport *report) const {
+ 	Modifier::debugInspect(report);
+@@ -138,18 +263,54 @@ DisplayBitmapModifier::~DisplayBitmapModifier() {
+ }
+ 
+ bool DisplayBitmapModifier::load(const PlugInModifierLoaderContext &context, const Data::Hoologic::DisplayBitmapModifier &data) {
++	if (data.displayWhen.type != Data::PlugInTypeTaggedValue::kEvent || data.removeWhen.type != Data::PlugInTypeTaggedValue::kEvent || data.bitmapVar.type != Data::PlugInTypeTaggedValue::kVariableReference)
++		return false;
++
++	if (!_displayWhen.load(data.displayWhen.value.asEvent) || !_removeWhen.load(data.removeWhen.value.asEvent))
++		return false;
++
++	_bitmapVar = VarReference(data.bitmapVar.value.asVarRefGUID, "");
++
+ 	return true;
+ }
+ 
+ bool DisplayBitmapModifier::respondsToEvent(const Event &evt) const {
+-	return false;
++	return _displayWhen.respondsTo(evt) || _removeWhen.respondsTo(evt);
+ }
+ 
+ VThreadState DisplayBitmapModifier::consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
++	if (_displayWhen.respondsTo(msg->getEvent()))
++		setDisplayed(runtime, true);
++	else if (_removeWhen.respondsTo(msg->getEvent()))
++		setDisplayed(runtime, false);
++
+ 	return kVThreadReturn;
+ }
+ 
+ void DisplayBitmapModifier::disable(Runtime *runtime) {
++	setDisplayed(runtime, false);
++}
++
++void DisplayBitmapModifier::setDisplayed(Runtime *runtime, bool displayed) {
++	Structural *owner = findStructuralOwner();
++	if (!owner || !owner->isElement() || !static_cast<Element *>(owner)->isVisual())
++		return;
++
++	// The element draws the current contents of the variable, so later changes to the bitmap are displayed too
++	VisualElement *element = static_cast<VisualElement *>(owner);
++	BitmapVariableModifier *bitmapVar = displayed ? BitmapVariableModifier::resolve(_bitmapVar) : nullptr;
++	if (bitmapVar)
++		element->setDisplayBitmapSource(bitmapVar->getSelfReference());
++	else
++		element->setDisplayBitmapSource(Common::WeakPtr<RuntimeObject>());
++}
++
++void DisplayBitmapModifier::linkInternalReferences(ObjectLinkingScope *scope) {
++	_bitmapVar.linkInternalReferences(scope);
++}
++
++void DisplayBitmapModifier::visitInternalReferences(IStructuralReferenceVisitor *visitor) {
++	_bitmapVar.visitInternalReferences(visitor);
+ }
+ 
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+@@ -173,20 +334,70 @@ ScaleBitmapModifier::~ScaleBitmapModifier() {
+ }
+ 
+ bool ScaleBitmapModifier::load(const PlugInModifierLoaderContext &context, const Data::Hoologic::ScaleBitmapModifier &data) {
++	if (data.scaleWhen.type != Data::PlugInTypeTaggedValue::kEvent || data.bitmapVar.type != Data::PlugInTypeTaggedValue::kVariableReference)
++		return false;
++
++	// The size has only been seen as incoming data
++	if (data.size.type != Data::PlugInTypeTaggedValue::kIncomingData)
++		return false;
++
++	if (!_scaleWhen.load(data.scaleWhen.value.asEvent))
++		return false;
++
++	_bitmapVar = VarReference(data.bitmapVar.value.asVarRefGUID, "");
++
+ 	return true;
+ }
+ 
+ bool ScaleBitmapModifier::respondsToEvent(const Event &evt) const {
+-	return false;
++	return _scaleWhen.respondsTo(evt);
+ }
+ 
+ VThreadState ScaleBitmapModifier::consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
++	if (!_scaleWhen.respondsTo(msg->getEvent()))
++		return kVThreadReturn;
++
++	BitmapVariableModifier *bitmapVar = BitmapVariableModifier::resolve(_bitmapVar);
++	if (!bitmapVar) {
++		warning("Scale Bitmap modifier couldn't resolve its bitmap variable");
++		return kVThreadReturn;
++	}
++
++	const DynamicValue &size = msg->getValue();
++	if (size.getType() != DynamicValueTypes::kPoint) {
++		warning("Scale Bitmap modifier expected a point size");
++		return kVThreadReturn;
++	}
++
++	const Common::SharedPtr<Graphics::ManagedSurface> &bitmap = bitmapVar->getBitmap();
++	if (!bitmap)
++		return kVThreadReturn;
++
++	int16 newWidth = size.getPoint().x;
++	int16 newHeight = size.getPoint().y;
++	if (newWidth <= 0 || newHeight <= 0) {
++		bitmapVar->setBitmap(nullptr);
++	} else if (newWidth != bitmap->w || newHeight != bitmap->h) {
++		bitmapVar->setBitmap(Common::SharedPtr<Graphics::ManagedSurface>(bitmap->scale(newWidth, newHeight)));
++	}
++
++	// Elements displaying the bitmap need to be redrawn
++	runtime->setSceneGraphDirty();
++
+ 	return kVThreadReturn;
+ }
+ 
+ void ScaleBitmapModifier::disable(Runtime *runtime) {
+ }
+ 
++void ScaleBitmapModifier::linkInternalReferences(ObjectLinkingScope *scope) {
++	_bitmapVar.linkInternalReferences(scope);
++}
++
++void ScaleBitmapModifier::visitInternalReferences(IStructuralReferenceVisitor *visitor) {
++	_bitmapVar.visitInternalReferences(visitor);
++}
++
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ void ScaleBitmapModifier::debugInspect(IDebugInspectionReport *report) const {
+ 	Modifier::debugInspect(report);
+diff --git a/engines/mtropolis/plugin/hoologic.h b/engines/mtropolis/plugin/hoologic.h
+index a27a11db782..db88ba16b10 100644
+--- a/engines/mtropolis/plugin/hoologic.h
++++ b/engines/mtropolis/plugin/hoologic.h
+@@ -31,20 +31,48 @@ namespace MTropolis {
+ 
+ namespace Hoologic {
+ 
+-class BitmapVariableModifier : public Modifier {
++class BitmapVariableStorage : public VariableStorage {
++public:
++	friend class BitmapVariableModifier;
++
++	Common::SharedPtr<ModifierSaveLoad> getSaveLoad(Runtime *runtime) override;
++
++	Common::SharedPtr<VariableStorage> clone() const override;
++
++private:
++	// Bitmaps aren't saved, the game recaptures them when needed
++	class SaveLoad : public ModifierSaveLoad {
++	private:
++		void commitLoad() const override;
++		void saveInternal(Common::WriteStream *stream) const override;
++		bool loadInternal(Common::ReadStream *stream, uint32 saveFileVersion) override;
++	};
++
++	// Bitmaps are never modified in place, so copies of a variable can share them
++	Common::SharedPtr<Graphics::ManagedSurface> _bitmap;
++};
++
++class BitmapVariableModifier : public VariableModifier, public IDisplayBitmapSource {
+ public:
+ 	BitmapVariableModifier();
+-	~BitmapVariableModifier();
+ 
+ 	bool load(const PlugInModifierLoaderContext &context, const Data::Hoologic::BitmapVariableModifier &data);
+ 
+-	bool respondsToEvent(const Event &evt) const override;
+-	VThreadState consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) override;
++	bool varSetValue(MiniscriptThread *thread, const DynamicValue &value) override;
++	void varGetValue(DynamicValue &dest) const override;
+ 
+-	void disable(Runtime *runtime) override;
++	bool readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) override;
++
++	const Common::SharedPtr<Graphics::ManagedSurface> &getBitmap() const;
++	void setBitmap(const Common::SharedPtr<Graphics::ManagedSurface> &bitmap);
++
++	Common::SharedPtr<Graphics::ManagedSurface> getDisplayBitmap() const override;
++
++	static BitmapVariableModifier *resolve(const VarReference &varRef);
+ 
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ 	const char *debugGetTypeName() const override { return "BitmapVariable Modifier"; }
++	SupportStatus debugGetSupportStatus() const override { return kSupportStatusPartial; }
+ 	void debugInspect(IDebugInspectionReport *report) const override;
+ #endif
+ 
+@@ -65,14 +93,21 @@ public:
+ 
+ 	void disable(Runtime *runtime) override;
+ 
++	void linkInternalReferences(ObjectLinkingScope *scope) override;
++	void visitInternalReferences(IStructuralReferenceVisitor *visitor) override;
++
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ 	const char *debugGetTypeName() const override { return "CaptureBitmap Modifier"; }
++	SupportStatus debugGetSupportStatus() const override { return kSupportStatusPartial; }
+ 	void debugInspect(IDebugInspectionReport *report) const override;
+ #endif
+ 
+ private:
+ 	Common::SharedPtr<Modifier> shallowClone() const override;
+ 	const char *getDefaultName() const override;
++
++	Event _captureWhen;
++	VarReference _bitmapVar;
+ };
+ 
+ class ImportBitmapModifier : public Modifier {
+@@ -109,14 +144,24 @@ public:
+ 
+ 	void disable(Runtime *runtime) override;
+ 
++	void linkInternalReferences(ObjectLinkingScope *scope) override;
++	void visitInternalReferences(IStructuralReferenceVisitor *visitor) override;
++
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ 	const char *debugGetTypeName() const override { return "DisplayBitmap Modifier"; }
++	SupportStatus debugGetSupportStatus() const override { return kSupportStatusPartial; }
+ 	void debugInspect(IDebugInspectionReport *report) const override;
+ #endif
+ 
+ private:
+ 	Common::SharedPtr<Modifier> shallowClone() const override;
+ 	const char *getDefaultName() const override;
++
++	void setDisplayed(Runtime *runtime, bool displayed);
++
++	Event _displayWhen;
++	Event _removeWhen;
++	VarReference _bitmapVar;
+ };
+ 
+ class ScaleBitmapModifier : public Modifier {
+@@ -131,14 +176,21 @@ public:
+ 
+ 	void disable(Runtime *runtime) override;
+ 
++	void linkInternalReferences(ObjectLinkingScope *scope) override;
++	void visitInternalReferences(IStructuralReferenceVisitor *visitor) override;
++
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ 	const char *debugGetTypeName() const override { return "ScaleBitmap Modifier"; }
++	SupportStatus debugGetSupportStatus() const override { return kSupportStatusPartial; }
+ 	void debugInspect(IDebugInspectionReport *report) const override;
+ #endif
+ 
+ private:
+ 	Common::SharedPtr<Modifier> shallowClone() const override;
+ 	const char *getDefaultName() const override;
++
++	Event _scaleWhen;
++	VarReference _bitmapVar;
+ };
+ 
+ class SaveBitmapModifier : public Modifier {
+@@ -248,7 +300,7 @@ private:
+ 	PlugInModifierFactory<KeyStateModifier, Data::Hoologic::KeyStateModifier> _keyStateModifierFactory;
+ };
+ 
+-} // End of namespace FTTS
++} // End of namespace Hoologic
+ 
+ } // End of namespace MTropolis
+ 
+diff --git a/engines/mtropolis/plugin/hoologic_data.cpp b/engines/mtropolis/plugin/hoologic_data.cpp
+index 68a42dddcde..1c23768f2c2 100644
+--- a/engines/mtropolis/plugin/hoologic_data.cpp
++++ b/engines/mtropolis/plugin/hoologic_data.cpp
+@@ -40,7 +40,7 @@ DataReadErrorCode CaptureBitmapModifier::load(PlugIn &plugIn, const PlugInModifi
+ 	if (prefix.plugInRevision != 0)
+ 		return kDataReadErrorUnsupportedRevision;
+ 
+-	if (!unknown1Event.load(reader) || !unknown2VarRef.load(reader))
++	if (!captureWhen.load(reader) || !bitmapVar.load(reader))
+ 		return kDataReadErrorReadFailed;
+ 
+ 	return kDataReadErrorNone;
+@@ -60,7 +60,7 @@ DataReadErrorCode DisplayBitmapModifier::load(PlugIn &plugIn, const PlugInModifi
+ 	if (prefix.plugInRevision != 0)
+ 		return kDataReadErrorUnsupportedRevision;
+ 
+-	if (!unknown1Event.load(reader) || !unknown2VarRef.load(reader) || !unknown3VarRef.load(reader))
++	if (!displayWhen.load(reader) || !removeWhen.load(reader) || !bitmapVar.load(reader))
+ 		return kDataReadErrorReadFailed;
+ 
+ 	return kDataReadErrorNone;
+@@ -70,7 +70,7 @@ DataReadErrorCode ScaleBitmapModifier::load(PlugIn &plugIn, const PlugInModifier
+ 	if (prefix.plugInRevision != 0)
+ 		return kDataReadErrorUnsupportedRevision;
+ 
+-	if (!unknown1Event.load(reader) || !unknown2VarRef.load(reader) || !unknown3IncomingData.load(reader) || !unknown4Int.load(reader))
++	if (!scaleWhen.load(reader) || !bitmapVar.load(reader) || !size.load(reader) || !unknown4Int.load(reader))
+ 		return kDataReadErrorReadFailed;
+ 
+ 	return kDataReadErrorNone;
+diff --git a/engines/mtropolis/plugin/hoologic_data.h b/engines/mtropolis/plugin/hoologic_data.h
+index 0f606030e30..bdd751f2752 100644
+--- a/engines/mtropolis/plugin/hoologic_data.h
++++ b/engines/mtropolis/plugin/hoologic_data.h
+@@ -33,12 +33,12 @@ namespace Hoologic {
+ // Known Hoologic custom modifiers:
+ // * Bitmap Suite
+ // - hlBitmapVariable: variable storing a bitmap
+-// - hlCaptureBitmap: captures a screen image into a bitmap
++// - hlCaptureBitmap: captures the screen area of its parent element into a bitmap
+ // - hlPrintBitmap: print a bitmap
+ // - hlSaveBitmap: saves a bitmap as a PICT/BMP file
+ // - hlImportBitmap: load a bitmap from a PICT/BMP file
+-// - hlDisplayBitmap: display a bitmap
+-// - hlScaleBitmap: scale a bitmap
++// - hlDisplayBitmap: display a bitmap in place of its parent element contents
++// - hlScaleBitmap: scale a bitmap to a size
+ //
+ // * Painter Plugin
+ // - hlPainter: Creates painting effects and interaction by blending several pictures together
+@@ -56,8 +56,8 @@ protected:
+ };
+ 
+ struct CaptureBitmapModifier : public PlugInModifierData {
+-	PlugInTypeTaggedValue unknown1Event;
+-	PlugInTypeTaggedValue unknown2VarRef;
++	PlugInTypeTaggedValue captureWhen;
++	PlugInTypeTaggedValue bitmapVar;
+ protected:
+ 	DataReadErrorCode load(PlugIn &plugIn, const PlugInModifier &prefix, DataReader &reader) override;
+ };
+@@ -73,17 +73,17 @@ protected:
+ };
+ 
+ struct DisplayBitmapModifier : public PlugInModifierData {
+-	PlugInTypeTaggedValue unknown1Event;
+-	PlugInTypeTaggedValue unknown2VarRef;
+-	PlugInTypeTaggedValue unknown3VarRef;
++	PlugInTypeTaggedValue displayWhen;
++	PlugInTypeTaggedValue removeWhen;
++	PlugInTypeTaggedValue bitmapVar;
+ protected:
+ 	DataReadErrorCode load(PlugIn &plugIn, const PlugInModifier &prefix, DataReader &reader) override;
+ };
+ 
+ struct ScaleBitmapModifier : public PlugInModifierData {
+-	PlugInTypeTaggedValue unknown1Event;
+-	PlugInTypeTaggedValue unknown2VarRef;
+-	PlugInTypeTaggedValue unknown3IncomingData;
++	PlugInTypeTaggedValue scaleWhen;
++	PlugInTypeTaggedValue bitmapVar;
++	PlugInTypeTaggedValue size;
+ 	PlugInTypeTaggedValue unknown4Int;
+ protected:
+ 	DataReadErrorCode load(PlugIn &plugIn, const PlugInModifier &prefix, DataReader &reader) override;
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 7a653bd15c0..66739b1fbb2 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -9504,6 +9504,55 @@ void VisualElement::setShading(int16 topLeftBevelShading, int16 bottomRightBevel
+ 	}
+ }
+ 
++IDisplayBitmapSource::~IDisplayBitmapSource() {
++}
++
++void VisualElement::setDisplayBitmapSource(const Common::WeakPtr<RuntimeObject> &source) {
++	_displayBitmapSource = source;
++	_contentsDirty = true;
++}
++
++bool VisualElement::hasDisplayBitmapSource() const {
++	return !_displayBitmapSource.expired();
++}
++
++bool VisualElement::renderDisplayBitmap(Window *window) {
++	Common::SharedPtr<RuntimeObject> sourceObj = _displayBitmapSource.lock();
++	if (!sourceObj)
++		return false;
++
++	IDisplayBitmapSource *source = dynamic_cast<IDisplayBitmapSource *>(sourceObj.get());
++	if (!source)
++		return false;
++
++	Common::SharedPtr<Graphics::ManagedSurface> bitmap = source->getDisplayBitmap();
++	if (!bitmap)
++		return true;
++
++	Graphics::ManagedSurface *dest = window->getSurface().get();
++	if (bitmap->format != dest->format)
++		return true;
++
++	// The bitmap is drawn at the element position and clipped to the element size
++	Common::Rect srcRect(MIN<int16>(bitmap->w, _rect.width()), MIN<int16>(bitmap->h, _rect.height()));
++	Common::Point destPoint = _cachedAbsoluteOrigin;
++	if (destPoint.x < 0) {
++		srcRect.left -= destPoint.x;
++		destPoint.x = 0;
++	}
++	if (destPoint.y < 0) {
++		srcRect.top -= destPoint.y;
++		destPoint.y = 0;
++	}
++	srcRect.right = MIN<int16>(srcRect.right, srcRect.left + dest->w - destPoint.x);
++	srcRect.bottom = MIN<int16>(srcRect.bottom, srcRect.top + dest->h - destPoint.y);
++
++	if (srcRect.isValidRect() && !srcRect.isEmpty())
++		dest->blitFrom(*bitmap, srcRect, destPoint);
++
++	return true;
++}
++
+ bool VisualElement::needsRender() const {
+ 	if (_renderProps.isDirty() || _prevRect != _rect || _contentsDirty)
+ 		return true;
+diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
+index b7566802dce..6d26a816d90 100644
+--- a/engines/mtropolis/runtime.h
++++ b/engines/mtropolis/runtime.h
+@@ -2827,6 +2827,15 @@ private:
+ 	bool _isDirty;
+ };
+ 
++// Supplies a bitmap that a visual element draws instead of its own contents.
++// Used by plug-ins such as the Hoologic Display Bitmap modifier.
++class IDisplayBitmapSource {
++public:
++	virtual ~IDisplayBitmapSource();
++
++	virtual Common::SharedPtr<Graphics::ManagedSurface> getDisplayBitmap() const = 0;
++};
++
+ class VisualElement : public Element {
+ public:
+ 	VisualElement();
+@@ -2908,6 +2917,11 @@ public:
+ 
+ 	void pushVisibilityChangeTask(Runtime *runtime, bool desiredVisibility);
+ 
++	// Sets an object that supplies a bitmap to draw instead of the element contents, or clears it if null.
++	// The source object must implement IDisplayBitmapSource.
++	void setDisplayBitmapSource(const Common::WeakPtr<RuntimeObject> &source);
++	bool hasDisplayBitmapSource() const;
++
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ 	void debugInspect(IDebugInspectionReport *report) const override;
+ #endif
+@@ -2915,6 +2929,9 @@ public:
+ protected:
+ 	VisualElement(const VisualElement &other);
+ 
++	// Draws the display bitmap if a source is set, returns false if the element should render its own contents
++	bool renderDisplayBitmap(Window *window);
++
+ 	bool loadCommon(const Common::String &name, uint32 guid, const Data::Rect &rect, uint32 elementFlags, uint16 layer, uint32 streamLocator, uint16 sectionID);
+ 
+ 	MiniscriptInstructionOutcome scriptSetDirect(MiniscriptThread *thread, const DynamicValue &dest);
+@@ -2992,6 +3009,8 @@ protected:
+ 
+ 	Common::Rect _prevRect;
+ 	bool _contentsDirty;
++
++	Common::WeakPtr<RuntimeObject> _displayBitmapSource;
+ };
+ 
+ class NonVisualElement : public Element {
+-- 
+2.54.0 (Apple Git-157)
+

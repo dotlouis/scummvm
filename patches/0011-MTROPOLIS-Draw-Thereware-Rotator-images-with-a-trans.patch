@@ -1,0 +1,50 @@
+From 2574136225822bf59b5f64209a33648365ac40de Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 02:21:53 -0700
+Subject: [PATCH 11/41] MTROPOLIS: Draw Thereware Rotator images with a
+ transparent background
+
+The Rotator modifier draws its element itself. Rotation still isn't
+implemented, but switch the element from copy ink to background
+transparent ink with a white key when the modifier is enabled, so the
+unrotated image at least doesn't cover what's behind it with white.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/plugin/thereware.cpp | 17 ++++++++++++++++-
+ 1 file changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/engines/mtropolis/plugin/thereware.cpp b/engines/mtropolis/plugin/thereware.cpp
+index f408bfec690..c4e1b656edf 100644
+--- a/engines/mtropolis/plugin/thereware.cpp
++++ b/engines/mtropolis/plugin/thereware.cpp
+@@ -52,10 +52,25 @@ bool RotatorModifier::readAttribute(MiniscriptThread *thread, DynamicValue &resu
+ }
+ 
+ bool RotatorModifier::respondsToEvent(const Event &evt) const {
+-	return false;
++	return Event(EventIDs::kParentEnabled, 0).respondsTo(evt);
+ }
+ 
+ VThreadState RotatorModifier::consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
++	// Rotation isn't implemented. The rotator draws the image itself with its white background
++	// transparent, so at least draw the unrotated image that way.
++	if (Event(EventIDs::kParentEnabled, 0).respondsTo(msg->getEvent())) {
++		Structural *owner = findStructuralOwner();
++		if (owner && owner->isElement() && static_cast<Element *>(owner)->isVisual()) {
++			VisualElement *element = static_cast<VisualElement *>(owner);
++			VisualElementRenderProperties props = element->getRenderProperties();
++			if (props.getInkMode() == VisualElementRenderProperties::kInkModeDefault || props.getInkMode() == VisualElementRenderProperties::kInkModeCopy) {
++				props.setInkMode(VisualElementRenderProperties::kInkModeBackgroundTransparent);
++				props.setBackColor(ColorRGB8(255, 255, 255));
++				element->setRenderProperties(props, element->getPrimaryGraphicModifier());
++			}
++		}
++	}
++
+ 	return kVThreadReturn;
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

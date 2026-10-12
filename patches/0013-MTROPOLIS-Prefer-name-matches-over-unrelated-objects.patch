@@ -1,0 +1,58 @@
+From 0b4561e3af9009c5e9162ec06461348f91bc4b72 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 03:15:56 -0700
+Subject: [PATCH 13/41] MTROPOLIS: Prefer name matches over unrelated objects
+ with the same GUID
+
+Some projects contain objects copied with stale references, whose GUID
+now belongs to an unrelated object in scope. When the object found by
+GUID doesn't have the referenced name and another object does, use the
+one with the right name.
+
+In Uncle Albert's Fabulous Voyage, the object transfer script of the
+notebook objects references "size_originale_anim" by a GUID that
+belongs to an integer variable named "ordre_layer".
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 21 +++++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 5e28846cf3a..b306f08c076 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -4098,11 +4098,28 @@ Common::WeakPtr<RuntimeObject> ObjectLinkingScope::resolve(const Common::String
+ 	}
+ }
+ 
++static bool runtimeObjectHasName(RuntimeObject *obj, const Common::String &name) {
++	if (obj->isStructural())
++		return caseInsensitiveEqual(static_cast<Structural *>(obj)->getName(), name);
++	if (obj->isModifier())
++		return caseInsensitiveEqual(static_cast<Modifier *>(obj)->getName(), name);
++	return true;
++}
++
+ Common::WeakPtr<RuntimeObject> ObjectLinkingScope::resolve(uint32 staticGUID, const Common::String &name, bool isNameAlreadyInsensitive) const {
+ 	Common::WeakPtr<RuntimeObject> byGUIDResult = resolve(staticGUID);
+-	if (!byGUIDResult.expired())
++	if (!byGUIDResult.expired()) {
++		// Some projects contain objects that were copied with stale references, whose GUID now belongs
++		// to an unrelated object. If the GUID match has another name, prefer an object with the right name.
++		Common::SharedPtr<RuntimeObject> byGUIDObject = byGUIDResult.lock();
++		if (!name.empty() && !runtimeObjectHasName(byGUIDObject.get(), name)) {
++			Common::WeakPtr<RuntimeObject> byNameResult = resolve(name, isNameAlreadyInsensitive);
++			if (!byNameResult.expired())
++				return byNameResult;
++		}
++
+ 		return byGUIDResult;
+-	else {
++	} else {
+ 		Common::WeakPtr<RuntimeObject> fallback = resolve(name, isNameAlreadyInsensitive);
+ 		if (fallback.expired()) {
+ 			warning("Couldn't resolve static guid '%x' with name '%s'", staticGUID, name.c_str());
+-- 
+2.54.0 (Apple Git-157)
+

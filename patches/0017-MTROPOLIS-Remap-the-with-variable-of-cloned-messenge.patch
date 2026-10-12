@@ -1,0 +1,32 @@
+From b2aa4f52c6516497340fd52e8c5bb9e24fb9c2e6 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 04:07:00 -0700
+Subject: [PATCH 17/41] MTROPOLIS: Remap the "with" variable of cloned
+ messengers
+
+Messengers visited an unused resolved variable field instead of the
+variable reference of their "with" value, so cloned messengers kept
+sending the variable of the original object instead of the clone's.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 75562f4ae35..93474e98f4d 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -2303,6 +2303,9 @@ void MessengerSendSpec::visitInternalReferences(IStructuralReferenceVisitor *vis
+ 	visitor->visitWeakModifierRef(_resolvedModifierDest);
+ 	visitor->visitWeakStructuralRef(_resolvedStructuralDest);
+ 	visitor->visitWeakModifierRef(_resolvedVarSource);
++
++	// The "with" value can reference a variable, which must follow the messenger when it's cloned
++	with.visitInternalReferences(visitor);
+ }
+ 
+ void MessengerSendSpec::resolveDestination(Runtime *runtime, Modifier *sender, RuntimeObject *triggerSource, Common::WeakPtr<Structural> &outStructuralDest, Common::WeakPtr<Modifier> &outModifierDest, RuntimeObject *customDestination) const {
+-- 
+2.54.0 (Apple Git-157)
+

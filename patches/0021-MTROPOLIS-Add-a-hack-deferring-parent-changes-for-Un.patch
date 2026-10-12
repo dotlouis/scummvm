@@ -1,0 +1,116 @@
+From e746a962509e1dbc2aa5db134a2633becfa03cbf Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 09:45:57 -0700
+Subject: [PATCH 21/41] MTROPOLIS: Add a hack deferring parent changes for
+ Uncle Albert's Fabulous Voyage
+
+The game restores the objects of a notebook page with a loop that clones
+one object per frame, and counts the replies that the clones send when
+their parent changes. It only starts the page turn when the last reply
+arrives after the loop has ended. Parent changes run as soon as possible
+in ScummVM, so every reply arrived before the end of the loop and the page
+turn never started.
+
+Make parent changes requested during a frame happen at the end of the
+next frame for this game, after its timers and messages. The exact
+timing of the original player isn't known.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/hacks.cpp     |  1 +
+ engines/mtropolis/hacks.h       |  5 +++++
+ engines/mtropolis/mtropolis.cpp |  2 ++
+ engines/mtropolis/runtime.cpp   | 22 +++++++++++++++++++++-
+ 4 files changed, 29 insertions(+), 1 deletion(-)
+
+diff --git a/engines/mtropolis/hacks.cpp b/engines/mtropolis/hacks.cpp
+index 27a8c0cb811..033f418e6a2 100644
+--- a/engines/mtropolis/hacks.cpp
++++ b/engines/mtropolis/hacks.cpp
+@@ -46,6 +46,7 @@ Hacks::Hacks() {
+ 	mtiSceneReturnHack = false;
+ 	mtiHispaniolaDamagedStringHack = false;
+ 	ignoreSceneUnloads = false;
++	deferParentChangesToEndOfNextFrame = false;
+ }
+ 
+ Hacks::~Hacks() {
+diff --git a/engines/mtropolis/hacks.h b/engines/mtropolis/hacks.h
+index 79b620042a7..515ca3bb059 100644
+--- a/engines/mtropolis/hacks.h
++++ b/engines/mtropolis/hacks.h
+@@ -58,6 +58,11 @@ struct Hacks {
+ 
+ 	bool ignoreSceneUnloads;
+ 
++	// Parent changes requested during a frame are only made at the end of the next frame, once nothing else is
++	// pending. Uncle Albert's Fabulous Voyage counts the replies that cloned objects send when their parent
++	// changes, and expects them after the loop that clones them has ended.
++	bool deferParentChangesToEndOfNextFrame;
++
+ 	uint midiVolumeScale;	// 256 = 1.0
+ 
+ 	uint32 minTransitionDuration;
+diff --git a/engines/mtropolis/mtropolis.cpp b/engines/mtropolis/mtropolis.cpp
+index e4866c0e81c..ae300a53f1f 100644
+--- a/engines/mtropolis/mtropolis.cpp
++++ b/engines/mtropolis/mtropolis.cpp
+@@ -324,6 +324,8 @@ Common::Error MTropolisEngine::run() {
+ 
+ 			HackSuites::addObsidianImprovedWidescreen(*_gameDescription, _runtime->getHacks());
+ 		}
++	} else if (_gameDescription->gameID == GID_ALBERT2) {
++		_runtime->getHacks().deferParentChangesToEndOfNextFrame = true;
+ 	} else if (_gameDescription->gameID == GID_MTI) {
+ 		HackSuites::addMTIQuirks(*_gameDescription, _runtime->getHacks());
+ 	} else if (_gameDescription->gameID == GID_UNIT) {
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 8ec7d499e68..62792becb1b 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -4667,6 +4667,9 @@ bool Runtime::runFrame() {
+ 	_realTime = timeMillis - _realTimeBase;
+ 	_playTime = timeMillis - _playTimeBase;
+ 
++	// With deferred parent changes, only the changes requested before this frame are made, at the end of it
++	size_t numDeferredParentChangesReady = _pendingParentChanges.size();
++
+ 	for (;;) {
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ 		if (_debugger && _debugger->isPaused())
+@@ -4813,7 +4816,7 @@ bool Runtime::runFrame() {
+ 		// - Parent Enabled -> Clone for each cloned object
+ 		// - Show for each cloned object that is visible
+ 		// - Hide -> Kill -> Parent Disabled for each killed object
+-		if (_pendingParentChanges.size() > 0) {
++		if (_pendingParentChanges.size() > 0 && !_hacks.deferParentChangesToEndOfNextFrame) {
+ 			ObjectParentChange parentChange = _pendingParentChanges.remove_at(0);
+ 
+ 			RuntimeObject *obj = parentChange._object.lock().get();
+@@ -5021,6 +5024,23 @@ bool Runtime::runFrame() {
+ 		if (_isQuitting)
+ 			return false;
+ 
++		if (numDeferredParentChangesReady > 0 && _pendingParentChanges.size() > 0) {
++			numDeferredParentChangesReady--;
++			ObjectParentChange parentChange = _pendingParentChanges.remove_at(0);
++
++			RuntimeObject *obj = parentChange._object.lock().get();
++			RuntimeObject *newParent = parentChange._newParent.lock().get();
++
++			if (obj) {
++				if (newParent)
++					executeChangeObjectParent(obj, newParent);
++				else
++					warning("Object re-parenting failed, the new parent was invalid!");
++			}
++
++			continue;
++		}
++
+ 		// Ran out of actions
+ 		break;
+ 	}
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,72 @@
+From 15defdad37bb4a9c8217b35c4a41f0b81eb59628 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 12:25:09 -0700
+Subject: [PATCH 27/41] MTROPOLIS: Accept constant and variable sizes in
+ Hoologic Scale Bitmap
+
+The size of hlScaleBitmap modifiers was only accepted as the incoming
+data. Uncle Albert's Fabulous Voyage also uses another kind of size on
+the Bombay page, and the page failed to load with "Modifier object failed
+to load".
+
+Load the size as a dynamic value source, which also covers constants and
+variables.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/plugin/hoologic.cpp | 8 +++++---
+ engines/mtropolis/plugin/hoologic.h   | 1 +
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/engines/mtropolis/plugin/hoologic.cpp b/engines/mtropolis/plugin/hoologic.cpp
+index 4727ebe678c..48cce6136f1 100644
+--- a/engines/mtropolis/plugin/hoologic.cpp
++++ b/engines/mtropolis/plugin/hoologic.cpp
+@@ -337,8 +337,8 @@ bool ScaleBitmapModifier::load(const PlugInModifierLoaderContext &context, const
+ 	if (data.scaleWhen.type != Data::PlugInTypeTaggedValue::kEvent || data.bitmapVar.type != Data::PlugInTypeTaggedValue::kVariableReference)
+ 		return false;
+ 
+-	// The size has only been seen as incoming data
+-	if (data.size.type != Data::PlugInTypeTaggedValue::kIncomingData)
++	// The size is usually the incoming data, but can be a constant or a variable
++	if (!_size.load(data.size))
+ 		return false;
+ 
+ 	if (!_scaleWhen.load(data.scaleWhen.value.asEvent))
+@@ -363,7 +363,7 @@ VThreadState ScaleBitmapModifier::consumeMessage(Runtime *runtime, const Common:
+ 		return kVThreadReturn;
+ 	}
+ 
+-	const DynamicValue &size = msg->getValue();
++	DynamicValue size = _size.produceValue(msg->getValue()).dereference();
+ 	if (size.getType() != DynamicValueTypes::kPoint) {
+ 		warning("Scale Bitmap modifier expected a point size");
+ 		return kVThreadReturn;
+@@ -392,10 +392,12 @@ void ScaleBitmapModifier::disable(Runtime *runtime) {
+ 
+ void ScaleBitmapModifier::linkInternalReferences(ObjectLinkingScope *scope) {
+ 	_bitmapVar.linkInternalReferences(scope);
++	_size.linkInternalReferences(scope);
+ }
+ 
+ void ScaleBitmapModifier::visitInternalReferences(IStructuralReferenceVisitor *visitor) {
+ 	_bitmapVar.visitInternalReferences(visitor);
++	_size.visitInternalReferences(visitor);
+ }
+ 
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+diff --git a/engines/mtropolis/plugin/hoologic.h b/engines/mtropolis/plugin/hoologic.h
+index db88ba16b10..e8498d4e902 100644
+--- a/engines/mtropolis/plugin/hoologic.h
++++ b/engines/mtropolis/plugin/hoologic.h
+@@ -191,6 +191,7 @@ private:
+ 
+ 	Event _scaleWhen;
+ 	VarReference _bitmapVar;
++	DynamicValueSource _size;
+ };
+ 
+ class SaveBitmapModifier : public Modifier {
+-- 
+2.54.0 (Apple Git-157)
+

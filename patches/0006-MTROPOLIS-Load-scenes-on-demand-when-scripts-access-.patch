@@ -1,0 +1,65 @@
+From 37a805b067b409e44c4ecb83d68d2864f3bb434f Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 01:05:28 -0700
+Subject: [PATCH 06/41] MTROPOLIS: Load scenes on demand when scripts access
+ their children
+
+Reading or writing a child of a scene that hasn't been loaded yet, by
+name or with "nthelement", now loads the scene first, like sending a
+message to it already does. Uncle Albert's Fabulous Voyage keeps
+template objects in library scenes that are never shown and sends them
+messages through paths such as project.bibliotheque.objets.white_scroll.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 20 ++++++++------------
+ 1 file changed, 8 insertions(+), 12 deletions(-)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 66739b1fbb2..57c84a37bb0 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -3518,12 +3518,9 @@ bool Structural::readAttribute(MiniscriptThread *thread, DynamicValue &result, c
+ 	if (RuntimeObject::readAttribute(thread, result, attrib))
+ 		return true;
+ 
+-	if (_sceneLoadState == Structural::SceneLoadState::kSceneNotLoaded) {
+-#ifdef MTROPOLIS_DEBUG_ENABLE
+-		if (Debugger *debugger = thread->getRuntime()->debugGetDebugger())
+-			debugger->notify(kDebugSeverityError, "Hot-loading scenes is not yet implemented (readAttribute)");
+-#endif
+-	}
++	// Scripts can reach into scenes that were never loaded, e.g. to send messages to objects in a library scene
++	if (_sceneLoadState == Structural::SceneLoadState::kSceneNotLoaded)
++		thread->getRuntime()->hotLoadScene(this);
+ 
+ 	// Traverse children (modifiers must be first)
+ 	for (const Common::SharedPtr<Modifier> &modifier : _modifiers) {
+@@ -3593,6 +3590,9 @@ MiniscriptInstructionOutcome Structural::writeRefAttribute(MiniscriptThread *thr
+ 		return kMiniscriptInstructionOutcomeContinue;
+ 	}
+ 
++	if (_sceneLoadState == Structural::SceneLoadState::kSceneNotLoaded)
++		thread->getRuntime()->hotLoadScene(this);
++
+ 	// Attempt to resolve as a child object
+ 	// Modifiers are first, then structural
+ 	for (const Common::SharedPtr<Modifier> &modifier : _modifiers) {
+@@ -3614,12 +3614,8 @@ MiniscriptInstructionOutcome Structural::writeRefAttribute(MiniscriptThread *thr
+ 
+ bool Structural::readAttributeIndexed(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib, const DynamicValue &index) {
+ 	if (attrib == "nthelement") {
+-		if (_sceneLoadState == Structural::SceneLoadState::kSceneNotLoaded) {
+-#ifdef MTROPOLIS_DEBUG_ENABLE
+-			if (Debugger *debugger = thread->getRuntime()->debugGetDebugger())
+-				debugger->notify(kDebugSeverityError, "Hot-loading scenes is not yet implemented (readAttributeIndexed)");
+-#endif
+-		}
++		if (_sceneLoadState == Structural::SceneLoadState::kSceneNotLoaded)
++			thread->getRuntime()->hotLoadScene(this);
+ 
+ 		DynamicValue indexConverted;
+ 		if (!index.convertToType(DynamicValueTypes::kInteger, indexConverted)) {
+-- 
+2.54.0 (Apple Git-157)
+

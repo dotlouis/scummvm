@@ -1,0 +1,38 @@
+From 004f3b01853e2e57f3011464cf0c5d5928390c61 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 01:04:56 -0700
+Subject: [PATCH 35/41] MTROPOLIS: Support the objectid attribute
+
+Scripts can read "objectid", a number that identifies an object while
+the project runs. Uncle Albert's Fabulous Voyage uses it to tell the
+toads apart in the sorcerer's hut, and failed with "Unable to read
+object attribute 'objectid'".
+
+Return the runtime GUID of the object.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 052c9b02e8a..2385eb72b08 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -2868,6 +2868,13 @@ bool RuntimeObject::isElement() const {
+ }
+ 
+ bool RuntimeObject::readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) {
++	// A number that identifies the object while the project runs. Uncle Albert's Fabulous Voyage uses it to tell
++	// toads apart in the sorcerer's hut.
++	if (attrib == "objectid") {
++		result.setInt(static_cast<int32>(_runtimeGUID));
++		return true;
++	}
++
+ 	return false;
+ }
+ 
+-- 
+2.54.0 (Apple Git-157)
+

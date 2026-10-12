@@ -1,0 +1,105 @@
+From 09c6aed2347d706b419be61e0c2cee7786344eb7 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 16:37:55 -0700
+Subject: [PATCH 05/41] MTROPOLIS: Fix background transparent ink for paletted
+ images
+
+When an 8-bit image is kept paletted and blitted to a higher color
+depth screen, the transparent color was converted with the paletted
+pixel format, which always gives 0, so the background was never
+transparent. Use the palette index closest to the background color
+instead.
+
+Uncle Albert's Fabulous Voyage covers its notebook scenes with
+full-screen images whose white background is meant to be transparent.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/elements.cpp | 47 +++++++++++++++++++++++++++-------
+ 1 file changed, 38 insertions(+), 9 deletions(-)
+
+diff --git a/engines/mtropolis/elements.cpp b/engines/mtropolis/elements.cpp
+index 356efde0100..0cd5e50b682 100644
+--- a/engines/mtropolis/elements.cpp
++++ b/engines/mtropolis/elements.cpp
+@@ -1259,6 +1259,25 @@ void ImageElement::tryAutoSetName(Runtime *runtime, Project *project) {
+ 	_name = project->getAssetNameByID(_assetID);
+ }
+ 
++// Returns the index of the palette color closest to the given color
++static uint32 findPaletteIndex(const uint8 *paletteData, uint paletteSize, const ColorRGB8 &color) {
++	uint32 bestIndex = 0;
++	int bestDistance = -1;
++	for (uint i = 0; i < paletteSize; i++) {
++		int dr = static_cast<int>(paletteData[i * 3 + 0]) - color.r;
++		int dg = static_cast<int>(paletteData[i * 3 + 1]) - color.g;
++		int db = static_cast<int>(paletteData[i * 3 + 2]) - color.b;
++		int distance = dr * dr + dg * dg + db * db;
++		if (bestDistance < 0 || distance < bestDistance) {
++			bestIndex = i;
++			bestDistance = distance;
++			if (distance == 0)
++				break;
++		}
++	}
++	return bestIndex;
++}
++
+ void ImageElement::render(Window *window) {
+ 	if (renderDisplayBitmap(window))
+ 		return;
+@@ -1273,21 +1292,28 @@ void ImageElement::render(Window *window) {
+ 		Common::Rect srcRect(optimized->w, optimized->h);
+ 		Common::Rect destRect(_cachedAbsoluteOrigin.x, _cachedAbsoluteOrigin.y, _cachedAbsoluteOrigin.x + _rect.width(), _cachedAbsoluteOrigin.y + _rect.height());
+ 
++		const uint8 bwPalette[2 * 3] = {
++			255, 255, 255,
++			0, 0, 0
++		};
++		const uint8 *paletteData = nullptr;
++		uint paletteSize = 0;
++
+ 		if (optimized->format.bytesPerPixel == 1) {
+ 			// FIXME: Pass palette to blit functions instead
+ 			if (_cachedImage->getOriginalColorDepth() == kColorDepthMode1Bit) {
+-				const uint8 bwPalette[2 * 3] = {
+-					255, 255, 255,
+-					0, 0, 0
+-				};
+-				optimized->setPalette(bwPalette, 0, 2);
++				paletteData = bwPalette;
++				paletteSize = 2;
+ 			} else {
+ 				const Palette *palette = getPalette().get();
+ 				if (!palette)
+ 					palette = &getRuntime()->getGlobalPalette();
+ 
+-				optimized->setPalette(palette->getPalette(), 0, 256);
++				paletteData = palette->getPalette();
++				paletteSize = 256;
+ 			}
++
++			optimized->setPalette(paletteData, 0, paletteSize);
+ 		}
+ 
+ 		uint8 alpha = _transitionProps.getAlpha();
+@@ -1305,10 +1331,13 @@ void ImageElement::render(Window *window) {
+ 		if (inkMode == VisualElementRenderProperties::kInkModeBackgroundMatte || inkMode == VisualElementRenderProperties::kInkModeBackgroundTransparent) {
+ 			const ColorRGB8 transColorRGB8 = _renderProps.getBackColor();
+ 			uint32 transColor = optimized->format.ARGBToColor(0, transColorRGB8.r, transColorRGB8.g, transColorRGB8.b);
+-
+-			// Awful hack to work around transBlit not working with either 0 or -1
+-			if (transColor == 0)
++			if (paletteData) {
++				// Paletted images are compared by index, so use the index of the background color
++				transColor = findPaletteIndex(paletteData, paletteSize, transColorRGB8);
++			} else if (transColor == 0) {
++				// Awful hack to work around transBlit not working with either 0 or -1
+ 				transColor = optimized->format.ARGBToColor(255, transColorRGB8.r, transColorRGB8.g, transColorRGB8.b);
++			}
+ 
+ 			window->getSurface()->transBlitFrom(*optimized, srcRect, destRect, transColor, false, alpha);
+ 		} else if (inkMode == VisualElementRenderProperties::kInkModeDefault || inkMode == VisualElementRenderProperties::kInkModeCopy) {
+-- 
+2.54.0 (Apple Git-157)
+

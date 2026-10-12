@@ -1,0 +1,59 @@
+From 83ce1d54ab2db9b1d482eedd6b994465de22a39e Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 01:05:36 -0700
+Subject: [PATCH 08/41] MTROPOLIS: Add the size attribute to the Thereware
+ Rotator modifier
+
+The Rotator modifier is still a stub and doesn't rotate anything, but
+scripts read its "size" to remember the size of the rotated image.
+Return the size of the element it's attached to, which is what an
+unrotated image would have.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/plugin/thereware.cpp | 15 +++++++++++++++
+ engines/mtropolis/plugin/thereware.h   |  2 ++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/engines/mtropolis/plugin/thereware.cpp b/engines/mtropolis/plugin/thereware.cpp
+index 4a186f02b8f..f408bfec690 100644
+--- a/engines/mtropolis/plugin/thereware.cpp
++++ b/engines/mtropolis/plugin/thereware.cpp
+@@ -36,6 +36,21 @@ bool RotatorModifier::load(const PlugInModifierLoaderContext &context, const Dat
+ 	return true;
+ }
+ 
++bool RotatorModifier::readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) {
++	// Rotation isn't implemented, so the rotated image always has the size of the element
++	if (attrib == "size") {
++		Structural *owner = findStructuralOwner();
++		if (owner && owner->isElement() && static_cast<Element *>(owner)->isVisual()) {
++			const Common::Rect &rect = static_cast<VisualElement *>(owner)->getRelativeRect();
++			result.setPoint(Common::Point(rect.width(), rect.height()));
++		} else
++			result.setPoint(Common::Point(0, 0));
++		return true;
++	}
++
++	return Modifier::readAttribute(thread, result, attrib);
++}
++
+ bool RotatorModifier::respondsToEvent(const Event &evt) const {
+ 	return false;
+ }
+diff --git a/engines/mtropolis/plugin/thereware.h b/engines/mtropolis/plugin/thereware.h
+index 3039a9b0df0..cff07796d1c 100644
+--- a/engines/mtropolis/plugin/thereware.h
++++ b/engines/mtropolis/plugin/thereware.h
+@@ -82,6 +82,8 @@ public:
+ 
+ 	bool load(const PlugInModifierLoaderContext &context, const Data::Thereware::RotatorModifier &data);
+ 
++	bool readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) override;
++
+ 	bool respondsToEvent(const Event &evt) const override;
+ 	VThreadState consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) override;
+ 
+-- 
+2.54.0 (Apple Git-157)
+

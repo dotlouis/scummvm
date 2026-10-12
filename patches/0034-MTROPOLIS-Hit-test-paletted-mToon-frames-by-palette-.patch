@@ -1,0 +1,48 @@
+From 61e5cea0422963154e577668d6f9713423b965e2 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 00:32:18 -0700
+Subject: [PATCH 34/41] MTROPOLIS: Hit-test paletted mToon frames by palette
+ index
+
+The per-pixel mouse test of background matte mToons compared the pixels
+with the transparent color converted to the surface format. For 8-bit
+frames that isn't a palette index, so no pixel was transparent and the
+whole frame took the clicks. In Uncle Albert's Fabulous Voyage the
+crumpled hint papers then covered the bookmark tabs below them.
+
+Look the transparent color up in the palette, like drawing does.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/elements.cpp | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/engines/mtropolis/elements.cpp b/engines/mtropolis/elements.cpp
+index 3ec4c20b9e8..254d2d5727f 100644
+--- a/engines/mtropolis/elements.cpp
++++ b/engines/mtropolis/elements.cpp
+@@ -1666,6 +1666,21 @@ bool MToonElement::isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) con
+ 			ColorRGB8 transColorRGB8 = _renderProps.getBackColor();
+ 			uint32 transColor = _renderSurface->format.ARGBToColor(255, transColorRGB8.r, transColorRGB8.g, transColorRGB8.b);
+ 
++			if (_renderSurface->format.bytesPerPixel == 1) {
++				// Paletted frames are compared by index, like when they are drawn
++				const Palette *palette = getPalette().get();
++				if (!palette)
++					palette = &getRuntime()->getGlobalPalette();
++
++				const byte *paletteData = palette->getPalette();
++				for (uint i = 0; i < Palette::kNumColors; i++) {
++					if (transColorRGB8 == ColorRGB8(paletteData[i * 3 + 0], paletteData[i * 3 + 1], paletteData[i * 3 + 2])) {
++						transColor = i;
++						break;
++					}
++				}
++			}
++
+ 			if (frameRect.width() == _renderSurface->w && frameRect.height() == _renderSurface->h) {
+ 				// Frame rect is the size of the render surface, meaning the frame is floating and we need to adjust to its coordinates
+ 				relativeX -= frameRect.left;
+-- 
+2.54.0 (Apple Git-157)
+

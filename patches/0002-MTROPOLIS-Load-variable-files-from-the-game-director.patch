@@ -1,0 +1,349 @@
+From 1215423c12e54232e2bbdffcfe5a9958af92da7a Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 23:07:21 +0200
+Subject: [PATCH 02/41] MTROPOLIS: Load variable files from the game directory
+
+The Save and Restore modifier is used by some games (e.g. Uncle Albert's
+Fabulous Voyage) to load data files shipped with the game, which are
+stored in the native mTropolis variable file format. When no ScummVM
+save exists for a named load, parse the file from the project directory
+and copy its values into the target variable. Saves still go to the
+ScummVM save system and take precedence on later loads.
+
+Also support vector values in plug-in data, read list values from
+variable files even if the persistent flag is clear, and drop list
+values that failed to load instead of using them uninitialized.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ engines/mtropolis/data.cpp                 |  7 +++
+ engines/mtropolis/data.h                   |  7 +++
+ engines/mtropolis/modifiers.cpp            | 55 ++++++++++++++++-
+ engines/mtropolis/mtropolis.h              |  4 +-
+ engines/mtropolis/plugin/standard_data.cpp |  5 ++
+ engines/mtropolis/runtime.cpp              | 72 ++++++++++++++++++++++
+ engines/mtropolis/runtime.h                |  3 +
+ engines/mtropolis/saveload.cpp             |  4 ++
+ engines/mtropolis/saveload.h               |  1 +
+ 9 files changed, 156 insertions(+), 2 deletions(-)
+
+diff --git a/engines/mtropolis/data.cpp b/engines/mtropolis/data.cpp
+index a8dff291fb4..2aac52232eb 100644
+--- a/engines/mtropolis/data.cpp
++++ b/engines/mtropolis/data.cpp
+@@ -545,6 +545,13 @@ bool PlugInTypeTaggedValue::load(DataReader &reader) {
+ 		if (!value.asFloat.load(reader))
+ 			return false;
+ 		break;
++	case kVector: {
++			value.constructField(&ValueUnion::asVector);
++			// Angle, unknown (always 0?), magnitude
++			XPFloatPOD unknown;
++			if (!value.asVector.angleRadians.load(reader) || !unknown.load(reader) || !value.asVector.magnitude.load(reader))
++				return false;
++		} break;
+ 	case kBoolean:
+ 		value.constructField(&ValueUnion::asBoolean);
+ 		if (!reader.readU16(value.asBoolean))
+diff --git a/engines/mtropolis/data.h b/engines/mtropolis/data.h
+index d08b650545e..85c389fd17f 100644
+--- a/engines/mtropolis/data.h
++++ b/engines/mtropolis/data.h
+@@ -396,6 +396,11 @@ struct XPFloatPOD {
+ 	Common::XPFloat toXPFloat() const;
+ };
+ 
++struct XPFloatVectorPOD {
++	XPFloatPOD angleRadians;
++	XPFloatPOD magnitude;
++};
++
+ struct Label {
+ 	bool load(DataReader &reader);
+ 
+@@ -472,6 +477,7 @@ struct PlugInTypeTaggedValue : public Common::NonCopyable {
+ 		kPoint = 0xa,
+ 		kIntegerRange = 0xb,
+ 		kFloat = 0xf,
++		kVector = 0x10,
+ 		kBoolean = 0x14,
+ 		kEvent = 0x17,
+ 		kLabel = 0x64,
+@@ -491,6 +497,7 @@ struct PlugInTypeTaggedValue : public Common::NonCopyable {
+ 		ColorRGB16 asColor;
+ 		IntRange asIntRange;
+ 		XPFloatPOD asFloat;
++		XPFloatVectorPOD asVector;
+ 		uint16 asBoolean;
+ 		Event asEvent;
+ 		Label asLabel;
+diff --git a/engines/mtropolis/modifiers.cpp b/engines/mtropolis/modifiers.cpp
+index 70051fcf1cf..235154edc4e 100644
+--- a/engines/mtropolis/modifiers.cpp
++++ b/engines/mtropolis/modifiers.cpp
+@@ -30,6 +30,7 @@
+ #include "mtropolis/miniscript.h"
+ #include "mtropolis/modifiers.h"
+ #include "mtropolis/modifier_factory.h"
++#include "mtropolis/mtropolis.h"
+ #include "mtropolis/saveload.h"
+ 
+ #include "mtropolis/elements.h"
+@@ -70,6 +71,52 @@ bool CompoundVarLoader::readSave(Common::ReadStream *stream, uint32 saveFileVers
+ 	return true;
+ }
+ 
++// Copies variable values from a variable loaded from an mTropolis variable file into a project variable
++static bool transferVariableState(Runtime *runtime, Modifier *dest, Modifier *src) {
++	if (dest->isCompoundVariable() && src->isCompoundVariable()) {
++		const Common::Array<Common::SharedPtr<Modifier> > &destChildren = dest->getChildContainer()->getModifiers();
++		const Common::Array<Common::SharedPtr<Modifier> > &srcChildren = src->getChildContainer()->getModifiers();
++
++		if (destChildren.size() != srcChildren.size())
++			warning("Compound variable '%s' has %u children but the variable file has %u", dest->getName().c_str(), static_cast<uint>(destChildren.size()), static_cast<uint>(srcChildren.size()));
++
++		bool succeeded = true;
++		for (size_t i = 0; i < destChildren.size() && i < srcChildren.size(); i++) {
++			if (!transferVariableState(runtime, destChildren[i].get(), srcChildren[i].get()))
++				succeeded = false;
++		}
++
++		return succeeded;
++	}
++
++	if (!dest->isVariable() || !src->isVariable() || strcmp(dest->getDefaultName(), src->getDefaultName()) != 0) {
++		warning("Variable '%s' type doesn't match the variable file (%s vs %s)", dest->getName().c_str(), dest->getDefaultName(), src->getDefaultName());
++		return false;
++	}
++
++	Common::SharedPtr<ModifierSaveLoad> srcSaveLoad = src->getSaveLoad(runtime);
++	Common::SharedPtr<ModifierSaveLoad> destSaveLoad = dest->getSaveLoad(runtime);
++	if (!srcSaveLoad || !destSaveLoad)
++		return false;
++
++	// The save data header identifies the modifier, so make it match the destination
++	src->setName(dest->getName());
++
++	Common::MemoryWriteStreamDynamic writeStream(DisposeAfterUse::YES);
++	srcSaveLoad->save(src, &writeStream);
++	WRITE_BE_UINT32(writeStream.getData(), dest->getStaticGUID());
++
++	Common::MemoryReadStream readStream(writeStream.getData(), writeStream.size());
++	if (!destSaveLoad->load(dest, &readStream, MTropolisEngine::kCurrentSaveFileVersion))
++		return false;
++
++	destSaveLoad->commitLoad();
++
++	debug(2, "Loaded variable '%s' from variable file", dest->getName().c_str());
++
++	return true;
++}
++
+ BehaviorModifier::BehaviorModifier() : _switchable(false), _isEnabled(false) {
+ }
+ 
+@@ -448,8 +495,14 @@ VThreadState SaveAndRestoreModifier::consumeMessage(Runtime *runtime, const Comm
+ 		bool succeeded = false;
+ 		if (isPrompt)
+ 			succeeded = runtime->getLoadProvider()->promptLoad(&loader);
+-		else
++		else if (runtime->getLoadProvider()->namedSaveExists(_fileName))
+ 			succeeded = runtime->getLoadProvider()->namedLoad(&loader, _fileName);
++		else {
++			// No save yet, use the file from the game directory if there is one
++			Common::SharedPtr<Modifier> fileVar = runtime->getProject()->loadVariableFile(_filePath, _fileName);
++			if (fileVar)
++				succeeded = transferVariableState(runtime, static_cast<Modifier *>(obj), fileVar.get());
++		}
+ 
+ 		if (succeeded) {
+ 			for (const Common::SharedPtr<SaveLoadHooks> &hooks : runtime->getHacks().saveLoadHooks)
+diff --git a/engines/mtropolis/mtropolis.h b/engines/mtropolis/mtropolis.h
+index eb54054c368..1147d361f3e 100644
+--- a/engines/mtropolis/mtropolis.h
++++ b/engines/mtropolis/mtropolis.h
+@@ -68,9 +68,12 @@ public:
+ 	bool autoSave(ISaveWriter *writer) override;
+ 	bool promptLoad(ISaveReader *reader) override;
+ 	bool namedLoad(ISaveReader *reader, const Common::String &fileName) override;
++	bool namedSaveExists(const Common::String &fileName) override;
+ 
+ 	const Graphics::Surface *getSavegameScreenshot() const;
+ 
++	static const uint kCurrentSaveFileVersion = 2;
++
+ 	Common::Error saveGameStream(Common::WriteStream *stream, bool isAutosave) override;
+ 	bool canSaveAutosaveCurrently() override;
+ 	bool canSaveGameStateCurrently(Common::U32String *msg = nullptr) override;	
+@@ -87,7 +90,6 @@ private:
+ 
+ 	Common::String getUnpromptedSaveFileName(const Common::String &fileName);
+ 
+-	static const uint kCurrentSaveFileVersion = 2;
+ 	static const uint kEarliestSupportedSaveFileVersion = 2;
+ 	static const uint kSavegameSignature = 0x6d545356;	// mTSV
+ 
+diff --git a/engines/mtropolis/plugin/standard_data.cpp b/engines/mtropolis/plugin/standard_data.cpp
+index 1bb6897b443..8170c58e838 100644
+--- a/engines/mtropolis/plugin/standard_data.cpp
++++ b/engines/mtropolis/plugin/standard_data.cpp
+@@ -136,6 +136,10 @@ DataReadErrorCode ListVariableModifier::load(PlugIn &plugIn, const PlugInModifie
+ 				return kDataReadErrorReadFailed;
+ 
+ 			havePersistentData = (persistentFlag.value.asBoolean != 0);
++
++			// Variable files written by the Save and Restore modifier contain values even if the flag is off
++			if (!havePersistentData && reader.tell() < privateDataPos + static_cast<int64>(prefix.subObjectSize))
++				havePersistentData = true;
+ 		}
+ 
+ 		if (havePersistentData) {
+@@ -150,6 +154,7 @@ DataReadErrorCode ListVariableModifier::load(PlugIn &plugIn, const PlugInModifie
+ 				if (!values[i].load(reader)) {
+ 					if (static_cast<const MTropolis::Standard::StandardPlugIn &>(plugIn).getHacks().allowGarbledListModData) {
+ 						persistentValuesGarbled = true;
++						numValues = i;
+ 						if (!reader.seek(privateDataPos + prefix.subObjectSize))
+ 							return kDataReadErrorReadFailed;
+ 						break;
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 0a9b567b41e..b6952405da9 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -26,6 +26,7 @@
+ #include "common/random.h"
+ #include "common/substream.h"
+ #include "common/system.h"
++#include "common/tokenizer.h"
+ 
+ #include "graphics/cursorman.h"
+ #include "graphics/managed_surface.h"
+@@ -1359,6 +1360,10 @@ bool DynamicValue::loadConstant(const Data::PlugInTypeTaggedValue &data) {
+ 		_type = DynamicValueTypes::kBoolean;
+ 		_value.construct<bool, &ValueUnion::asBool>(data.value.asBoolean != 0);
+ 		break;
++	case Data::PlugInTypeTaggedValue::kVector:
++		_type = DynamicValueTypes::kVector;
++		_value.construct<AngleMagVector, &ValueUnion::asVector>(AngleMagVector::createRadians(data.value.asVector.angleRadians.toXPFloat().toDouble(), data.value.asVector.magnitude.toXPFloat().toDouble()));
++		break;
+ 	case Data::PlugInTypeTaggedValue::kEvent:
+ 		_type = DynamicValueTypes::kEvent;
+ 		_value.construct<Event, &ValueUnion::asEvent>(Event());
+@@ -8119,6 +8124,73 @@ void Project::closeSegmentStream(int segmentIndex) {
+ 	segment.weakStream = nullptr;
+ }
+ 
++Common::SharedPtr<Modifier> Project::loadVariableFile(const Common::String &filePath, const Common::String &fileName) {
++	const char *startupSegmentFolder = "<Startup Segment Folder>";
++
++	Common::String relativeDir = filePath;
++	if (relativeDir.hasPrefixIgnoreCase(startupSegmentFolder))
++		relativeDir = relativeDir.substr(strlen(startupSegmentFolder));
++	else if (!relativeDir.empty()) {
++		warning("Variable file path '%s' isn't relative to the startup segment folder, looking in the project directory instead", filePath.c_str());
++		relativeDir.clear();
++	}
++
++	Common::Path path = _projectRootDir;
++	for (const Common::String &component : Common::StringTokenizer(relativeDir, "/\\:").split())
++		path = path.appendComponent(component);
++	path = path.appendComponent(fileName);
++
++	Common::ScopedPtr<Common::SeekableReadStream> stream;
++	if (_platform == kProjectPlatformMacintosh)
++		stream.reset(Common::MacResManager::openFileOrDataFork(path, *_rootArchive));
++	else
++		stream.reset(_rootArchive->createReadStreamForMember(path));
++
++	if (!stream) {
++		debug(1, "Variable file '%s' doesn't exist", path.toString().c_str());
++		return nullptr;
++	}
++
++	Data::DataReader reader(0, *stream, (_platform == kProjectPlatformMacintosh) ? Data::kDataFormatMacintosh : Data::kDataFormatWindows, _runtimeVersion, false);
++
++	// Unknown header, always 0
++	uint32 header = 0;
++	if (!reader.readU32(header) || header != 0) {
++		warning("Variable file '%s' has an unexpected header", path.toString().c_str());
++		return nullptr;
++	}
++
++	const Data::PlugInModifierRegistry &plugInDataLoaderRegistry = _plugInRegistry.getDataLoaderRegistry();
++
++	Common::SharedPtr<Data::DataObject> dataObject;
++	Data::loadDataObject(plugInDataLoaderRegistry, reader, dataObject);
++
++	if (!dataObject || !Data::DataObjectTypes::isModifier(dataObject->getType())) {
++		warning("Variable file '%s' doesn't contain a modifier", path.toString().c_str());
++		return nullptr;
++	}
++
++	ChildLoaderStack loaderStack;
++	ModifierLoaderContext loaderContext(&loaderStack);
++	Common::SharedPtr<Modifier> modifier = loadModifierObject(loaderContext, *dataObject);
++
++	// Compound variable children follow their parent
++	while (!loaderStack.contexts.empty()) {
++		dataObject.reset();
++		Data::loadDataObject(plugInDataLoaderRegistry, reader, dataObject);
++		if (!dataObject || !Data::DataObjectTypes::isModifier(dataObject->getType())) {
++			warning("Failed to load child modifiers from variable file '%s'", path.toString().c_str());
++			return nullptr;
++		}
++
++		loadContextualObject(0, loaderStack, *dataObject);
++	}
++
++	debug(1, "Loaded variable file '%s'", path.toString().c_str());
++
++	return modifier;
++}
++
+ Common::SeekableReadStream* Project::getStreamForSegment(int segmentIndex) {
+ 	return _segments[segmentIndex].weakStream;
+ }
+diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
+index fef072a29c7..b7566802dce 100644
+--- a/engines/mtropolis/runtime.h
++++ b/engines/mtropolis/runtime.h
+@@ -2497,6 +2497,9 @@ public:
+ 	size_t getSegmentForStreamIndex(size_t streamIndex) const;
+ 	void openSegmentStream(int segmentIndex);
+ 	void closeSegmentStream(int segmentIndex);
++
++	// Loads a variable modifier from a file written by the mTropolis Save and Restore modifier
++	Common::SharedPtr<Modifier> loadVariableFile(const Common::String &filePath, const Common::String &fileName);
+ 	Common::SeekableReadStream *getStreamForSegment(int segmentIndex);
+ 
+ 	const Common::String *findNameOfLabel(const Label &label) const;
+diff --git a/engines/mtropolis/saveload.cpp b/engines/mtropolis/saveload.cpp
+index f7040395c3b..335f9d87a75 100644
+--- a/engines/mtropolis/saveload.cpp
++++ b/engines/mtropolis/saveload.cpp
+@@ -189,6 +189,10 @@ bool MTropolisEngine::namedLoad(ISaveReader *reader, const Common::String &fileN
+ 	return load(reader, getUnpromptedSaveFileName(fileName));
+ }
+ 
++bool MTropolisEngine::namedSaveExists(const Common::String &fileName) {
++	return _saveFileMan->exists(getUnpromptedSaveFileName(fileName));
++}
++
+ bool MTropolisEngine::autoSave(ISaveWriter *writer) {
+ 	ISaveWriter *oldWriter = _saveWriter;
+ 	bool oldIsTriggeredAutosave = _isTriggeredAutosave;
+diff --git a/engines/mtropolis/saveload.h b/engines/mtropolis/saveload.h
+index 3a6c91f1fe5..5d4fac37690 100644
+--- a/engines/mtropolis/saveload.h
++++ b/engines/mtropolis/saveload.h
+@@ -59,6 +59,7 @@ struct ISaveUIProvider : public IInterfaceBase {
+ struct ILoadUIProvider : public IInterfaceBase {
+ 	virtual bool promptLoad(ISaveReader *reader) = 0;
+ 	virtual bool namedLoad(ISaveReader *reader, const Common::String &fileName) = 0;
++	virtual bool namedSaveExists(const Common::String &fileName) = 0;
+ };
+ 
+ struct IAutoSaveProvider : public IInterfaceBase {
+-- 
+2.54.0 (Apple Git-157)
+

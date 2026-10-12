@@ -1,0 +1,36 @@
+From a5de385c825582c741c3c87ff172da799400970b Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 03:15:20 -0700
+Subject: [PATCH 12/41] MTROPOLIS: Fix the loop and visible attribute IDs of
+ Set Attribute messages
+
+The attribute name table mapped the "visible" attribute ID to "loop",
+overwriting its own "visible" entry, and the "loop" ID wasn't mapped at
+all. Messengers setting "loop" failed, which left the failing task on
+the VThread and stopped the runtime for good, and messengers setting
+"visible" changed "loop" instead.
+
+Uncle Albert's Fabulous Voyage sets "loop" this way when entering a
+notebook page, which froze the game in the middle of the page turn.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 02a1a22da39..5e28846cf3a 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -4589,7 +4589,7 @@ Runtime::Runtime(OSystem *system, Audio::Mixer *mixer, ISaveUIProvider *saveProv
+ 	_getSetAttribIDsToAttribName[AttributeIDs::kAttribVisible] = "visible";
+ 	_getSetAttribIDsToAttribName[AttributeIDs::kAttribLayer] = "layer";
+ 	_getSetAttribIDsToAttribName[AttributeIDs::kAttribPaused] = "paused";
+-	_getSetAttribIDsToAttribName[AttributeIDs::kAttribVisible] = "loop";
++	_getSetAttribIDsToAttribName[AttributeIDs::kAttribLoop] = "loop";
+ 	_getSetAttribIDsToAttribName[AttributeIDs::kAttribPosition] = "position";
+ 	_getSetAttribIDsToAttribName[AttributeIDs::kAttribWidth] = "width";
+ 	_getSetAttribIDsToAttribName[AttributeIDs::kAttribHeight] = "height";
+-- 
+2.54.0 (Apple Git-157)
+

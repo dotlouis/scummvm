@@ -1,0 +1,109 @@
+From b27e688927f611a53416b2aa178df2f3a1a3b133 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 04:52:38 -0700
+Subject: [PATCH 20/41] MTROPOLIS: Insert clones after their original and remap
+ their references
+
+Cloned elements were appended at the end of their parent's children,
+but scripts reach the original from the clone and back with the
+"previous element" and "next element" destinations, so the clone must
+come right after the original. Also remap references inside the whole
+cloned subtree, not only the reference to the cloned object itself, so
+that cloned modifiers point to the cloned objects.
+
+Uncle Albert's Fabulous Voyage clones its notebook objects this way
+when it restores a page.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 26 ++++++++++++++++++++++++--
+ engines/mtropolis/runtime.h   |  1 +
+ 2 files changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 93474e98f4d..8ec7d499e68 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -351,6 +351,9 @@ void ObjectRefRemapper::visitChildStructuralRef(Common::SharedPtr<Structural> &s
+ 		Common::HashMap<RuntimeObject *, RuntimeObject *> ::const_iterator it = _objectRemaps.find(obj);
+ 		if (it != _objectRemaps.end())
+ 			structural = it->_value->getSelfReference().lock().staticCast<Structural>();
++
++		// Remap the references inside the clone too, so they point to the cloned objects instead of the originals
++		structural->visitInternalReferences(this);
+ 	}
+ }
+ 
+@@ -360,6 +363,8 @@ void ObjectRefRemapper::visitChildModifierRef(Common::SharedPtr<Modifier> &modif
+ 		Common::HashMap<RuntimeObject *, RuntimeObject *>::const_iterator it = _objectRemaps.find(obj);
+ 		if (it != _objectRemaps.end())
+ 			modifier = it->_value->getSelfReference().lock().staticCast<Modifier>();
++
++		modifier->visitInternalReferences(this);
+ 	}
+ }
+ 
+@@ -2435,7 +2440,8 @@ void MessengerSendSpec::resolveVariableObjectType(RuntimeObject *obj, Common::We
+ }
+ 
+ void MessengerSendSpec::sendFromMessenger(Runtime *runtime, Modifier *sender, RuntimeObject *triggerSource, const DynamicValue &incomingData, RuntimeObject *customDestination) const {
+-	sendFromMessengerWithCustomData(runtime, sender, triggerSource, this->with.produceValue(incomingData), customDestination);
++	DynamicValue withValue = this->with.produceValue(incomingData);
++	sendFromMessengerWithCustomData(runtime, sender, triggerSource, withValue, customDestination);
+ }
+ 
+ void MessengerSendSpec::sendFromMessengerWithCustomData(Runtime *runtime, Modifier *sender, RuntimeObject *triggerSource, const DynamicValue &data, RuntimeObject *customDestination) const {
+@@ -3655,6 +3661,19 @@ void Structural::addChild(const Common::SharedPtr<Structural>& child) {
+ 	child->setParent(this);
+ }
+ 
++// Inserts a child right after an existing one, or at the end if it isn't found
++void Structural::addChildAfter(const Common::SharedPtr<Structural> &child, const Structural *sibling) {
++	for (size_t i = 0; i < _children.size(); i++) {
++		if (_children[i].get() == sibling) {
++			_children.insert_at(i + 1, child);
++			child->setParent(this);
++			return;
++		}
++	}
++
++	addChild(child);
++}
++
+ void Structural::removeAllChildren() {
+ 	_children.clear();
+ }
+@@ -5383,6 +5402,7 @@ void Runtime::executeCloneObject(RuntimeObject *object) {
+ 		}
+ 	} else if (object->isStructural()) {
+ 		Common::SharedPtr<Structural> structuralRef = object->getSelfReference().lock().staticCast<Structural>();
++		Structural *original = structuralRef.get();
+ 		Common::WeakPtr<RuntimeObject> relinkParent = structuralRef->getParent()->getSelfReference();
+ 
+ 		ObjectCloner cloner(this, relinkParent, &objectRemaps);
+@@ -5391,7 +5411,9 @@ void Runtime::executeCloneObject(RuntimeObject *object) {
+ 		ObjectRefRemapper remapper(objectRemaps);
+ 		remapper.visitChildStructuralRef(structuralRef);
+ 
+-		structuralRef->getParent()->addChild(structuralRef);
++		// The clone comes right after the original. Scripts rely on this to reach the original
++		// from the clone and back with the "previous element" and "next element" destinations.
++		structuralRef->getParent()->addChildAfter(structuralRef, original);
+ 
+ 		// Objects in scenes that were never shown (e.g. library scenes) never had their default visibility
+ 		// applied, so give the clone its authored visibility before its scripts run.
+diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
+index 8c6a853884c..42349a8d319 100644
+--- a/engines/mtropolis/runtime.h
++++ b/engines/mtropolis/runtime.h
+@@ -2214,6 +2214,7 @@ public:
+ 
+ 	const Common::Array<Common::SharedPtr<Structural> > &getChildren() const;
+ 	void addChild(const Common::SharedPtr<Structural> &child);
++	void addChildAfter(const Common::SharedPtr<Structural> &child, const Structural *sibling);
+ 	void removeAllChildren();
+ 	void removeAllModifiers();
+ 	void removeChild(Structural *child);
+-- 
+2.54.0 (Apple Git-157)
+

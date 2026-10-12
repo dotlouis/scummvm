@@ -1,0 +1,79 @@
+From 80ddd1c2c36a10a6802281a307d469788a7f907f Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 02:20:59 -0700
+Subject: [PATCH 10/41] MTROPOLIS: Fix showing cloned elements
+
+Cloned elements were queued for a post-clone show check that was never
+processed, so they never got their Show message and the runtime never
+became idle again after the first clone, which also blocks saving.
+Process the queue after pending clones, as the order of operations
+comment describes.
+
+Also give clones of elements from scenes that were never shown, such as
+library scenes holding template objects, their authored visibility
+before their Clone and Parent Enabled scripts run. Otherwise these
+clones and their children stay hidden forever.
+
+Uncle Albert's Fabulous Voyage clones every notebook object (parchments,
+photos, animals) from its library scenes.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 6bf888851df..02a1a22da39 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -4794,6 +4794,14 @@ bool Runtime::runFrame() {
+ 			continue;
+ 		}
+ 
++		// Cloned objects get their show check once all pending clones are done
++		if (_pendingPostCloneShowChecks.size() > 0) {
++			for (const Common::WeakPtr<Structural> &clonedObject : _pendingPostCloneShowChecks)
++				_pendingShowClonedObject.push_back(clonedObject);
++			_pendingPostCloneShowChecks.clear();
++			continue;
++		}
++
+ 		if (_pendingShowClonedObject.size() > 0) {
+ 			Structural *objectToShow = _pendingShowClonedObject.remove_at(0).lock().get();
+ 
+@@ -5300,6 +5308,16 @@ void Runtime::executeChangeObjectParent(RuntimeObject *object, RuntimeObject *ne
+ 	}
+ }
+ 
++static void recursiveApplyDefaultVisibility(Runtime *runtime, Structural *structural) {
++	if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
++		VisualElement *visual = static_cast<VisualElement *>(structural);
++		visual->setVisible(runtime, visual->isVisibleByDefault());
++	}
++
++	for (const Common::SharedPtr<Structural> &child : structural->getChildren())
++		recursiveApplyDefaultVisibility(runtime, child.get());
++}
++
+ void Runtime::executeCloneObject(RuntimeObject *object) {
+ 	Common::HashMap<RuntimeObject *, RuntimeObject *> objectRemaps;
+ 
+@@ -5350,6 +5368,15 @@ void Runtime::executeCloneObject(RuntimeObject *object) {
+ 
+ 		structuralRef->getParent()->addChild(structuralRef);
+ 
++		// Objects in scenes that were never shown (e.g. library scenes) never had their default visibility
++		// applied, so give the clone its authored visibility before its scripts run.
++		if (Structural *sceneOfOriginal = object->isStructural() ? static_cast<Structural *>(object) : nullptr) {
++			while (sceneOfOriginal && sceneOfOriginal->getSceneLoadState() == Structural::SceneLoadState::kNotAScene)
++				sceneOfOriginal = sceneOfOriginal->getParent();
++			if (sceneOfOriginal && sceneOfOriginal != _activeMainScene.get() && sceneOfOriginal != _activeSharedScene.get())
++				recursiveApplyDefaultVisibility(this, structuralRef.get());
++		}
++
+ 		_pendingPostCloneShowChecks.push_back(structuralRef);
+ 
+ 		{
+-- 
+2.54.0 (Apple Git-157)
+

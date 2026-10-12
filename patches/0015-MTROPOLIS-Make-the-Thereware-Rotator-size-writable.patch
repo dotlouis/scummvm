@@ -1,0 +1,131 @@
+From 0bd94643cb9533065715df9d5208459026c3c4f2 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 03:16:11 -0700
+Subject: [PATCH 15/41] MTROPOLIS: Make the Thereware Rotator size writable
+
+Scripts shrink notebook objects by writing the rotator "size", or its
+"x" and "y", every frame of the transfer animation. Store the size,
+which starts as the size of the element. Rotation and scaling are still
+not implemented, so it only affects what scripts read back.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/plugin/thereware.cpp | 58 ++++++++++++++++++++++----
+ engines/mtropolis/plugin/thereware.h   | 10 +++++
+ 2 files changed, 60 insertions(+), 8 deletions(-)
+
+diff --git a/engines/mtropolis/plugin/thereware.cpp b/engines/mtropolis/plugin/thereware.cpp
+index c4e1b656edf..02afdc19949 100644
+--- a/engines/mtropolis/plugin/thereware.cpp
++++ b/engines/mtropolis/plugin/thereware.cpp
+@@ -26,7 +26,7 @@ namespace MTropolis {
+ 
+ namespace Thereware {
+ 
+-RotatorModifier::RotatorModifier() {
++RotatorModifier::RotatorModifier() : _haveSize(false), _sizeX(0), _sizeY(0) {
+ }
+ 
+ RotatorModifier::~RotatorModifier() {
+@@ -36,21 +36,63 @@ bool RotatorModifier::load(const PlugInModifierLoaderContext &context, const Dat
+ 	return true;
+ }
+ 
++void RotatorModifier::initSize() {
++	if (_haveSize)
++		return;
++
++	Structural *owner = findStructuralOwner();
++	if (owner && owner->isElement() && static_cast<Element *>(owner)->isVisual()) {
++		const Common::Rect &rect = static_cast<VisualElement *>(owner)->getRelativeRect();
++		_sizeX = rect.width();
++		_sizeY = rect.height();
++	}
++	_haveSize = true;
++}
++
+ bool RotatorModifier::readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) {
+-	// Rotation isn't implemented, so the rotated image always has the size of the element
++	// Rotation isn't implemented, the size is only stored. It starts as the size of the element,
++	// which is what an unrotated image has.
+ 	if (attrib == "size") {
+-		Structural *owner = findStructuralOwner();
+-		if (owner && owner->isElement() && static_cast<Element *>(owner)->isVisual()) {
+-			const Common::Rect &rect = static_cast<VisualElement *>(owner)->getRelativeRect();
+-			result.setPoint(Common::Point(rect.width(), rect.height()));
+-		} else
+-			result.setPoint(Common::Point(0, 0));
++		initSize();
++		result.setPoint(Common::Point(_sizeX, _sizeY));
+ 		return true;
+ 	}
+ 
+ 	return Modifier::readAttribute(thread, result, attrib);
+ }
+ 
++MiniscriptInstructionOutcome RotatorModifier::writeRefAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &result, const Common::String &attrib) {
++	if (attrib == "size") {
++		initSize();
++		DynamicValueWriteOrRefAttribFuncHelper<RotatorModifier, &RotatorModifier::scriptSetSize, &RotatorModifier::scriptWriteRefSizeAttribute>::create(this, result);
++		return kMiniscriptInstructionOutcomeContinue;
++	}
++
++	return Modifier::writeRefAttribute(thread, result, attrib);
++}
++
++MiniscriptInstructionOutcome RotatorModifier::scriptSetSize(MiniscriptThread *thread, const DynamicValue &value) {
++	if (value.getType() != DynamicValueTypes::kPoint)
++		return kMiniscriptInstructionOutcomeFailed;
++
++	_sizeX = value.getPoint().x;
++	_sizeY = value.getPoint().y;
++	return kMiniscriptInstructionOutcomeContinue;
++}
++
++MiniscriptInstructionOutcome RotatorModifier::scriptWriteRefSizeAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib) {
++	if (attrib == "x") {
++		DynamicValueWriteIntegerHelper<int32>::create(&_sizeX, proxy);
++		return kMiniscriptInstructionOutcomeContinue;
++	}
++	if (attrib == "y") {
++		DynamicValueWriteIntegerHelper<int32>::create(&_sizeY, proxy);
++		return kMiniscriptInstructionOutcomeContinue;
++	}
++
++	return kMiniscriptInstructionOutcomeFailed;
++}
++
+ bool RotatorModifier::respondsToEvent(const Event &evt) const {
+ 	return Event(EventIDs::kParentEnabled, 0).respondsTo(evt);
+ }
+diff --git a/engines/mtropolis/plugin/thereware.h b/engines/mtropolis/plugin/thereware.h
+index cff07796d1c..c81b899e70e 100644
+--- a/engines/mtropolis/plugin/thereware.h
++++ b/engines/mtropolis/plugin/thereware.h
+@@ -83,6 +83,7 @@ public:
+ 	bool load(const PlugInModifierLoaderContext &context, const Data::Thereware::RotatorModifier &data);
+ 
+ 	bool readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) override;
++	MiniscriptInstructionOutcome writeRefAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &result, const Common::String &attrib) override;
+ 
+ 	bool respondsToEvent(const Event &evt) const override;
+ 	VThreadState consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) override;
+@@ -97,6 +98,15 @@ public:
+ private:
+ 	Common::SharedPtr<Modifier> shallowClone() const override;
+ 	const char *getDefaultName() const override;
++
++	MiniscriptInstructionOutcome scriptSetSize(MiniscriptThread *thread, const DynamicValue &value);
++	MiniscriptInstructionOutcome scriptWriteRefSizeAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib);
++	void initSize();
++
++	// Size of the rotated image, starts as the size of the element
++	bool _haveSize;
++	int32 _sizeX;
++	int32 _sizeY;
+ };
+ 
+ class TrackerModifier : public Modifier {
+-- 
+2.54.0 (Apple Git-157)
+

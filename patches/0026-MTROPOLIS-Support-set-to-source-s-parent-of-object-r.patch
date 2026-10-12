@@ -1,0 +1,117 @@
+From f24f6d5851a7e0c22d3a6632aa64d398af5fd1e2 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 11:56:45 -0700
+Subject: [PATCH 26/41] MTROPOLIS: Support "set to source's parent" of object
+ reference variables
+
+The "set to source's parent when" event of object reference variables
+was loaded but never handled. Uncle Albert's Fabulous Voyage uses it in
+the harbour crate game: the X-ray screen gets the crate passing under it
+this way, and failed with "Unable to read attribute 'parent' from
+rvalue" for every crate.
+
+When the event arrives, reference the parent of the message source.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/plugin/standard.cpp | 46 +++++++++++++++++----------
+ engines/mtropolis/plugin/standard.h   |  4 +++
+ 2 files changed, 34 insertions(+), 16 deletions(-)
+
+diff --git a/engines/mtropolis/plugin/standard.cpp b/engines/mtropolis/plugin/standard.cpp
+index 848dcf6fa17..558f4001193 100644
+--- a/engines/mtropolis/plugin/standard.cpp
++++ b/engines/mtropolis/plugin/standard.cpp
+@@ -508,6 +508,20 @@ bool ObjectReferenceVariableModifier::load(const PlugInModifierLoaderContext &co
+ 	return true;
+ }
+ 
++bool ObjectReferenceVariableModifier::respondsToEvent(const Event &evt) const {
++	return _setToSourceParentWhen.respondsTo(evt);
++}
++
++VThreadState ObjectReferenceVariableModifier::consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
++	// "Set to source's parent": reference the parent of the object that sent the message
++	if (_setToSourceParentWhen.respondsTo(msg->getEvent())) {
++		Common::SharedPtr<RuntimeObject> source = msg->getSource().lock();
++		setObject(source ? getObjectParent(source.get()) : nullptr);
++	}
++
++	return kVThreadReturn;
++}
++
+ // Object reference variables are somewhat unusual in that they don't store a simple value,
+ // they instead have "object" and "path" attributes AND as a value, they resolve to the
+ // modifier itself.
+@@ -595,30 +609,30 @@ MiniscriptInstructionOutcome ObjectReferenceVariableModifier::scriptSetPath(Mini
+ }
+ 
+ MiniscriptInstructionOutcome ObjectReferenceVariableModifier::scriptSetObject(MiniscriptThread *thread, const DynamicValue &value) {
+-	ObjectReferenceVariableStorage *storage = static_cast<ObjectReferenceVariableStorage *>(_storage.get());
+-
+ 	if (value.getType() == DynamicValueTypes::kNull) {
+-		storage->_object.reset();
+-		storage->_objectPath.clear();
+-		storage->_fullPath.clear();
+-
++		setObject(nullptr);
+ 		return kMiniscriptInstructionOutcomeContinue;
+ 	} else if (value.getType() == DynamicValueTypes::kObject) {
+-		Common::SharedPtr<RuntimeObject> obj = value.getObject().object.lock();
+-		if (!obj)
+-			return scriptSetObject(thread, DynamicValue());
+-
+-		if (!computeObjectPath(obj.get(), storage->_fullPath))
+-			return scriptSetObject(thread, DynamicValue());
+-
+-		storage->_objectPath = storage->_fullPath;
+-		storage->_object.object = obj;
+-
++		setObject(value.getObject().object.lock().get());
+ 		return kMiniscriptInstructionOutcomeContinue;
+ 	} else
+ 		return kMiniscriptInstructionOutcomeFailed;
+ }
+ 
++void ObjectReferenceVariableModifier::setObject(RuntimeObject *obj) {
++	ObjectReferenceVariableStorage *storage = static_cast<ObjectReferenceVariableStorage *>(_storage.get());
++
++	if (!obj || !computeObjectPath(obj, storage->_fullPath)) {
++		storage->_object.reset();
++		storage->_objectPath.clear();
++		storage->_fullPath.clear();
++		return;
++	}
++
++	storage->_objectPath = storage->_fullPath;
++	storage->_object.object = obj->getSelfReference();
++}
++
+ MiniscriptInstructionOutcome ObjectReferenceVariableModifier::scriptObjectRefAttrib(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib) {
+ 	ObjectReferenceVariableStorage *storage = static_cast<ObjectReferenceVariableStorage *>(_storage.get());
+ 
+diff --git a/engines/mtropolis/plugin/standard.h b/engines/mtropolis/plugin/standard.h
+index d518b35be65..155364b6957 100644
+--- a/engines/mtropolis/plugin/standard.h
++++ b/engines/mtropolis/plugin/standard.h
+@@ -175,6 +175,9 @@ public:
+ 
+ 	bool load(const PlugInModifierLoaderContext &context, const Data::Standard::ObjectReferenceVariableModifier &data);
+ 
++	bool respondsToEvent(const Event &evt) const override;
++	VThreadState consumeMessage(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) override;
++
+ 	bool varSetValue(MiniscriptThread *thread, const DynamicValue &value) override;
+ 	void varGetValue(DynamicValue &dest) const override;
+ 
+@@ -199,6 +202,7 @@ private:
+ 
+ 	MiniscriptInstructionOutcome scriptSetPath(MiniscriptThread *thread, const DynamicValue &value);
+ 	MiniscriptInstructionOutcome scriptSetObject(MiniscriptThread *thread, const DynamicValue &value);
++	void setObject(RuntimeObject *obj);
+ 	MiniscriptInstructionOutcome scriptObjectRefAttrib(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib);
+ 	MiniscriptInstructionOutcome scriptObjectRefAttribIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib, const DynamicValue &index);
+ 
+-- 
+2.54.0 (Apple Git-157)
+

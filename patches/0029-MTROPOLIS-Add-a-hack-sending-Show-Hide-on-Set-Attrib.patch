@@ -1,0 +1,100 @@
+From d27938bdcc051a921e10e2c8fbe5e6e211e3cbea Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 14:44:30 -0700
+Subject: [PATCH 29/41] MTROPOLIS: Add a hack sending Show/Hide on Set
+ Attribute "visible" for Uncle Albert's Fabulous Voyage
+
+When the notebook restores a page, it counts the objects it restores
+and waits for a reply from each one. Some objects, like the bottle on
+the Paris page, are hidden with a Set Attribute "visible" message when
+the scene starts, shown again with another one when restored, and only
+reply from their Show event. Set Attribute messages didn't send Show or
+Hide events, so the page restore never ended: the page turn stopped
+half way with the loading bar looping.
+
+For this game, a Set Attribute "visible" message that changes the
+visibility of an element also sends the Show or Hide event, like the
+Show and Hide commands. It is a hack because it is unknown whether
+mTropolis does this in general.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/hacks.cpp     |  1 +
+ engines/mtropolis/hacks.h       |  4 ++++
+ engines/mtropolis/mtropolis.cpp |  1 +
+ engines/mtropolis/runtime.cpp   | 11 +++++++++++
+ 4 files changed, 17 insertions(+)
+
+diff --git a/engines/mtropolis/hacks.cpp b/engines/mtropolis/hacks.cpp
+index 2481a92985b..7642ca62aba 100644
+--- a/engines/mtropolis/hacks.cpp
++++ b/engines/mtropolis/hacks.cpp
+@@ -48,6 +48,7 @@ Hacks::Hacks() {
+ 	ignoreSceneUnloads = false;
+ 	deferParentChangesToEndOfNextFrame = false;
+ 	swapRestoredPointLists = false;
++	attribSetVisibleShowsAndHides = false;
+ }
+ 
+ Hacks::~Hacks() {
+diff --git a/engines/mtropolis/hacks.h b/engines/mtropolis/hacks.h
+index 2f11219f15e..86c157559f6 100644
+--- a/engines/mtropolis/hacks.h
++++ b/engines/mtropolis/hacks.h
+@@ -67,6 +67,10 @@ struct Hacks {
+ 	// player, because the game swaps them back after loading.
+ 	bool swapRestoredPointLists;
+ 
++	// A Set Attribute "visible" message that changes the visibility also sends the Show or Hide event.
++	// Uncle Albert's Fabulous Voyage restores some notebook objects this way and waits for their Show event.
++	bool attribSetVisibleShowsAndHides;
++
+ 	uint midiVolumeScale;	// 256 = 1.0
+ 
+ 	uint32 minTransitionDuration;
+diff --git a/engines/mtropolis/mtropolis.cpp b/engines/mtropolis/mtropolis.cpp
+index c91ea8efb1f..57752f65254 100644
+--- a/engines/mtropolis/mtropolis.cpp
++++ b/engines/mtropolis/mtropolis.cpp
+@@ -327,6 +327,7 @@ Common::Error MTropolisEngine::run() {
+ 	} else if (_gameDescription->gameID == GID_ALBERT2) {
+ 		_runtime->getHacks().deferParentChangesToEndOfNextFrame = true;
+ 		_runtime->getHacks().swapRestoredPointLists = true;
++		_runtime->getHacks().attribSetVisibleShowsAndHides = true;
+ 	} else if (_gameDescription->gameID == GID_MTI) {
+ 		HackSuites::addMTIQuirks(*_gameDescription, _runtime->getHacks());
+ 	} else if (_gameDescription->gameID == GID_UNIT) {
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 72a66aaa133..ae9f3b63a71 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -3876,6 +3876,7 @@ CORO_BEGIN_DEFINITION(Structural::StructuralConsumeCommandCoroutine)
+ 		DynamicValueWriteProxy writeProxy;
+ 		DynamicValue attribGetResult;
+ 		bool quietlyDiscard;
++		bool wasVisible;
+ 	};
+ 
+ 	CORO_BEGIN_FUNCTION
+@@ -3926,8 +3927,18 @@ CORO_BEGIN_DEFINITION(Structural::StructuralConsumeCommandCoroutine)
+ 
+ 			CORO_AWAIT_MINISCRIPT(params->self->writeRefAttribute(locals->miniscriptThread.get(), locals->writeProxy, *locals->attribName));
+ 
++			locals->wasVisible = params->self->isElement() && static_cast<Element *>(params->self)->isVisual() && static_cast<VisualElement *>(params->self)->isVisible();
++
+ 			CORO_AWAIT_MINISCRIPT(locals->writeProxy.pod.ifc->write(locals->miniscriptThread.get(), params->msg->getValue(), locals->writeProxy.pod.objectRef, locals->writeProxy.pod.ptrOrOffset));
+ 
++			CORO_IF(params->runtime->getHacks().attribSetVisibleShowsAndHides && locals->attribID == AttributeIDs::kAttribVisible && params->self->isElement() && static_cast<Element *>(params->self)->isVisual()
++					&& static_cast<VisualElement *>(params->self)->isVisible() != locals->wasVisible)
++				Common::SharedPtr<MessageProperties> msgProps(new MessageProperties(Event(locals->wasVisible ? EventIDs::kElementHide : EventIDs::kElementShow, 0), DynamicValue(), params->self->getSelfReference()));
++				Common::SharedPtr<MessageDispatch> dispatch(new MessageDispatch(msgProps, params->self, false, true, false));
++
++				CORO_CALL(Runtime::SendMessageOnVThreadCoroutine, params->runtime, dispatch);
++			CORO_END_IF
++
+ 			CORO_RETURN;
+ 		CORO_ELSE_IF(params->msg->getEvent().eventType == EventIDs::kAttribGet)
+ 			locals->attribID = params->msg->getEvent().eventInfo;
+-- 
+2.54.0 (Apple Git-157)
+

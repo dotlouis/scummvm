@@ -1,0 +1,378 @@
+From c3170025d927f579a0204c57d26b7682c1dcfec6 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 23:28:58 +0200
+Subject: [PATCH 03/41] MTROPOLIS: Support calculated fields and editing in
+ text labels
+
+Implement the Update Calculated Fields command, which replaces <name>
+fields in a text label with the value of the variable of that name, and
+the Enable/Disable Edit commands, which allow typing into a text label.
+There is no caret or selection, the first keystroke replaces the text.
+
+Also add the list variable "insert" attribute and accept writes to the
+world manager "cursorelement" attribute, which is not implemented yet.
+
+Used by Uncle Albert's Fabulous Voyage for its translated texts and
+player name entry.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/elements.cpp        | 158 +++++++++++++++++++++++++-
+ engines/mtropolis/elements.h          |  13 ++-
+ engines/mtropolis/plugin/standard.cpp |  55 +++++++++
+ engines/mtropolis/plugin/standard.h   |   7 ++
+ engines/mtropolis/runtime.cpp         |   4 +
+ 5 files changed, 234 insertions(+), 3 deletions(-)
+
+diff --git a/engines/mtropolis/elements.cpp b/engines/mtropolis/elements.cpp
+index 56f05d8d57e..6060606822e 100644
+--- a/engines/mtropolis/elements.cpp
++++ b/engines/mtropolis/elements.cpp
+@@ -1990,20 +1990,22 @@ MiniscriptInstructionOutcome MToonElement::scriptSetRate(MiniscriptThread *threa
+ 
+ TextLabelElement::TextLabelElement()
+ 	: _cacheBitmap(false), _needsRender(false), _isBitmap(true), _assetID(0),
+-	  _macFontID(0), _size(12), _alignment(kTextAlignmentLeft) {
++	  _macFontID(0), _size(12), _alignment(kTextAlignmentLeft), _editReplacesText(false) {
+ }
+ 
+ TextLabelElement::TextLabelElement(const TextLabelElement &other)
+ 	: VisualElement(other), _cacheBitmap(other._cacheBitmap), _needsRender(other._needsRender), _isBitmap(other._isBitmap)
+ 	, _assetID(other._assetID), _text(other._text), _macFontID(other._macFontID), _fontFamilyName(other._fontFamilyName)
+ 	, _size(other._size), _alignment(other._alignment), _styleFlags(other._styleFlags), _macFormattingSpans(other._macFormattingSpans)
+-	, _renderedText(nullptr) {
++	, _editReplacesText(false), _renderedText(nullptr) {
+ 
+ 	if (other._isBitmap)
+ 		_renderedText = other._renderedText;
+ }
+ 
+ TextLabelElement::~TextLabelElement() {
++	if (_keyboardSignaller)
++		_keyboardSignaller->removeReceiver(this);
+ }
+ 
+ bool TextLabelElement::isTextLabel() const {
+@@ -2106,6 +2108,157 @@ void TextLabelElement::activate() {
+ }
+ 
+ void TextLabelElement::deactivate() {
++	setEditable(false);
++}
++
++VThreadState TextLabelElement::asyncConsumeCommand(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) {
++	const Event &evt = msg->getEvent();
++
++	if (Event(EventIDs::kElementUpdatedCalculated, 0).respondsTo(evt)) {
++		updateCalculatedFields();
++		return kVThreadReturn;
++	}
++
++	if (Event(EventIDs::kElementEnableEdit, 0).respondsTo(evt)) {
++		setEditable(true);
++		return kVThreadReturn;
++	}
++
++	if (Event(EventIDs::kElementDisableEdit, 0).respondsTo(evt)) {
++		setEditable(false);
++		return kVThreadReturn;
++	}
++
++	return VisualElement::asyncConsumeCommand(runtime, msg);
++}
++
++void TextLabelElement::onKeyboardEvent(Runtime *runtime, const KeyboardInputEvent &keyEvt) {
++	if (keyEvt.getKeyEventType() != Common::EVENT_KEYDOWN)
++		return;
++
++	const Common::KeyState &keyState = keyEvt.getKeyState();
++
++	if (keyState.keycode == Common::KEYCODE_BACKSPACE) {
++		if (_text.empty())
++			return;
++
++		if (_editReplacesText)
++			_text.clear();
++		else
++			_text.deleteLastChar();
++
++		_editReplacesText = false;
++		onTextChanged();
++		return;
++	}
++
++	if (keyState.ascii < 0x20 || keyState.ascii == 0x7f || (keyState.flags & (Common::KBD_CTRL | Common::KBD_ALT | Common::KBD_META)) != 0)
++		return;
++
++	Common::CodePage codePage = (runtime->getProject()->getPlatform() == kProjectPlatformMacintosh) ? Common::kMacRoman : Common::kWindows1252;
++
++	Common::u32char_type_t ch = keyState.ascii;
++	Common::String encoded = Common::U32String(&ch, 1).encode(codePage);
++	if (encoded.size() != 1 || (encoded[0] == '?' && ch != '?'))
++		return;
++
++	if (_editReplacesText)
++		_text = encoded;
++	else
++		_text += encoded;
++
++	_editReplacesText = false;
++	onTextChanged();
++}
++
++void TextLabelElement::updateCalculatedFields() {
++	if (_isBitmap)
++		return;
++
++	Common::String newText;
++	bool changed = false;
++
++	size_t pos = 0;
++	while (pos < _text.size()) {
++		size_t fieldStart = _text.find('<', pos);
++		if (fieldStart == Common::String::npos)
++			break;
++
++		size_t fieldEnd = _text.find('>', fieldStart + 1);
++		if (fieldEnd == Common::String::npos)
++			break;
++
++		newText += _text.substr(pos, fieldStart - pos);
++		pos = fieldEnd + 1;
++
++		Common::String varName = _text.substr(fieldStart + 1, fieldEnd - fieldStart - 1);
++		Common::String formatted;
++		bool resolved = false;
++
++		Common::WeakPtr<RuntimeObject> varObjWeak;
++		if (!varName.empty() && VarReference(0, varName).resolve(this, varObjWeak)) {
++			RuntimeObject *varObj = varObjWeak.lock().get();
++			if (varObj && varObj->isModifier() && static_cast<Modifier *>(varObj)->isVariable()) {
++				DynamicValue value;
++				static_cast<VariableModifier *>(varObj)->varGetValue(value);
++
++				resolved = true;
++				switch (value.getType()) {
++				case DynamicValueTypes::kString:
++					formatted = value.getString();
++					break;
++				case DynamicValueTypes::kInteger:
++					formatted = Common::String::format("%i", static_cast<int>(value.getInt()));
++					break;
++				case DynamicValueTypes::kFloat:
++					formatted = Common::String::format("%g", value.getFloat());
++					break;
++				case DynamicValueTypes::kBoolean:
++					formatted = value.getBool() ? "true" : "false";
++					break;
++				case DynamicValueTypes::kPoint:
++					formatted = Common::String::format("(%i,%i)", static_cast<int>(value.getPoint().x), static_cast<int>(value.getPoint().y));
++					break;
++				default:
++					resolved = false;
++					break;
++				}
++			}
++		}
++
++		if (resolved) {
++			newText += formatted;
++			changed = true;
++		} else
++			newText += _text.substr(fieldStart, pos - fieldStart);
++	}
++
++	if (!changed)
++		return;
++
++	newText += _text.substr(pos);
++	_text = newText;
++	_editReplacesText = (_keyboardSignaller != nullptr);
++	onTextChanged();
++}
++
++void TextLabelElement::setEditable(bool editable) {
++	// There's no caret or selection support, so the existing text behaves as if it was selected
++	// and the first keystroke replaces it.
++	if (editable && !_keyboardSignaller) {
++		_keyboardSignaller = getRuntime()->getProject()->notifyOnKeyboardEvent(this);
++		_editReplacesText = true;
++	} else if (!editable && _keyboardSignaller) {
++		_keyboardSignaller->removeReceiver(this);
++		_keyboardSignaller.reset();
++	}
++}
++
++void TextLabelElement::onTextChanged() {
++	_needsRender = true;
++	_isBitmap = false;
++	_contentsDirty = true;
++	_macFormattingSpans.clear();
+ }
+ 
+ void TextLabelElement::render(Window *window) {
+@@ -2328,6 +2481,7 @@ MiniscriptInstructionOutcome TextLabelElement::scriptSetText(MiniscriptThread *t
+ 	_isBitmap = false;
+ 	_contentsDirty = true;
+ 	_macFormattingSpans.clear();
++	_editReplacesText = (_keyboardSignaller != nullptr);
+ 
+ 	return kMiniscriptInstructionOutcomeContinue;
+ }
+diff --git a/engines/mtropolis/elements.h b/engines/mtropolis/elements.h
+index 9ac7c156835..4ff6d2c6001 100644
+--- a/engines/mtropolis/elements.h
++++ b/engines/mtropolis/elements.h
+@@ -331,7 +331,7 @@ private:
+ 	bool _hasIssuedRenderWarning;
+ };
+ 
+-class TextLabelElement : public VisualElement {
++class TextLabelElement : public VisualElement, public IKeyboardEventReceiver {
+ public:
+ 	TextLabelElement();
+ 	~TextLabelElement();
+@@ -345,11 +345,15 @@ public:
+ 	MiniscriptInstructionOutcome writeRefAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib) override;
+ 	MiniscriptInstructionOutcome writeRefAttributeIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib, const DynamicValue &index) override;
+ 
++	VThreadState asyncConsumeCommand(Runtime *runtime, const Common::SharedPtr<MessageProperties> &msg) override;
++
+ 	void activate() override;
+ 	void deactivate() override;
+ 
+ 	void render(Window *window) override;
+ 
++	void onKeyboardEvent(Runtime *runtime, const KeyboardInputEvent &keyEvt) override;
++
+ 	void setTextStyle(uint16 macFontID, const Common::String &fontFamilyName, uint size, TextAlignment alignment, const TextStyleFlags &styleFlags);
+ 
+ 	Graphics::FontManager::FontUsage getDefaultUsageForMacFont(uint16 macFontID, uint size);
+@@ -378,6 +382,10 @@ private:
+ 	bool findLineRange(size_t lineNum, uint32 &outStartPos, uint32 &outEndPos) const;
+ 	size_t countLines() const;
+ 
++	void updateCalculatedFields();
++	void setEditable(bool editable);
++	void onTextChanged();
++
+ 	bool _cacheBitmap;
+ 	bool _needsRender;
+ 
+@@ -393,6 +401,9 @@ private:
+ 
+ 	Common::Array<MacFormattingSpan> _macFormattingSpans;
+ 
++	Common::SharedPtr<KeyboardEventSignaller> _keyboardSignaller;
++	bool _editReplacesText;
++
+ 	// NOTE: This may be a surface loaded from data, so it must not be altered.
+ 	// If you need to render again, recreate the surface.  If you want to change
+ 	// this behavior, please add a flag indicating that it is from the asset.
+diff --git a/engines/mtropolis/plugin/standard.cpp b/engines/mtropolis/plugin/standard.cpp
+index 98537298736..4e4b178e750 100644
+--- a/engines/mtropolis/plugin/standard.cpp
++++ b/engines/mtropolis/plugin/standard.cpp
+@@ -1122,10 +1122,65 @@ MiniscriptInstructionOutcome ListVariableModifier::writeRefAttributeIndexed(Mini
+ 		storage->_list->createWriteProxyForIndex(realIndex, writeProxy);
+ 		writeProxy.containerList = storage->_list;
+ 		return kMiniscriptInstructionOutcomeContinue;
++	} else if (attrib == "insert") {
++		size_t realIndex = 0;
++		if (!storage->_list->dynamicValueToIndex(realIndex, index))
++			return kMiniscriptInstructionOutcomeFailed;
++
++		writeProxy.pod.ifc = DynamicValueWriteInterfaceGlue<InsertWriteInterface>::getInstance();
++		writeProxy.pod.objectRef = this;
++		writeProxy.pod.ptrOrOffset = realIndex;
++		return kMiniscriptInstructionOutcomeContinue;
+ 	}
+ 	return kMiniscriptInstructionOutcomeFailed;
+ }
+ 
++MiniscriptInstructionOutcome ListVariableModifier::scriptInsert(MiniscriptThread *thread, size_t index, const DynamicValue &value) {
++	ListVariableStorage *storage = static_cast<ListVariableStorage *>(_storage.get());
++
++	DynamicValue convertedValue;
++	if (!value.dereference().convertToType(storage->_preferredContentType, convertedValue)) {
++		thread->error("Failed to convert value inserted into a list variable");
++		return kMiniscriptInstructionOutcomeFailed;
++	}
++
++	Common::SharedPtr<DynamicList> oldList = storage->_list;
++	Common::SharedPtr<DynamicList> newList(new DynamicList());
++	newList->forceType(oldList->getType());
++
++	size_t oldSize = oldList->getSize();
++	size_t destIndex = 0;
++	for (size_t i = 0; i < oldSize; i++) {
++		if (i == index)
++			destIndex++;
++
++		DynamicValue element;
++		oldList->getAtIndex(i, element);
++		if (!newList->setAtIndex(destIndex++, element))
++			return kMiniscriptInstructionOutcomeFailed;
++	}
++
++	if (!newList->setAtIndex(index, convertedValue)) {
++		thread->error("Failed to insert value into a list variable");
++		return kMiniscriptInstructionOutcomeFailed;
++	}
++
++	storage->_list = newList;
++	return kMiniscriptInstructionOutcomeContinue;
++}
++
++MiniscriptInstructionOutcome ListVariableModifier::InsertWriteInterface::write(MiniscriptThread *thread, const DynamicValue &dest, void *objectRef, uintptr ptrOrOffset) {
++	return static_cast<ListVariableModifier *>(objectRef)->scriptInsert(thread, ptrOrOffset, dest);
++}
++
++MiniscriptInstructionOutcome ListVariableModifier::InsertWriteInterface::refAttrib(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib) {
++	return kMiniscriptInstructionOutcomeFailed;
++}
++
++MiniscriptInstructionOutcome ListVariableModifier::InsertWriteInterface::refAttribIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib, const DynamicValue &index) {
++	return kMiniscriptInstructionOutcomeFailed;
++}
++
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ void ListVariableModifier::debugInspect(IDebugInspectionReport *report) const {
+ 	VariableModifier::debugInspect(report);
+diff --git a/engines/mtropolis/plugin/standard.h b/engines/mtropolis/plugin/standard.h
+index 945f37697eb..7fd71a7867a 100644
+--- a/engines/mtropolis/plugin/standard.h
++++ b/engines/mtropolis/plugin/standard.h
+@@ -295,7 +295,14 @@ public:
+ #endif
+ 
+ private:
++	struct InsertWriteInterface {
++		static MiniscriptInstructionOutcome write(MiniscriptThread *thread, const DynamicValue &dest, void *objectRef, uintptr ptrOrOffset);
++		static MiniscriptInstructionOutcome refAttrib(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib);
++		static MiniscriptInstructionOutcome refAttribIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib, const DynamicValue &index);
++	};
++
+ 	MiniscriptInstructionOutcome scriptSetCount(MiniscriptThread *thread, const DynamicValue &value);
++	MiniscriptInstructionOutcome scriptInsert(MiniscriptThread *thread, size_t index, const DynamicValue &value);
+ 
+ 	Common::SharedPtr<Modifier> shallowClone() const override;
+ 	const char *getDefaultName() const override;
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index b6952405da9..7a653bd15c0 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -3051,6 +3051,10 @@ MiniscriptInstructionOutcome WorldManagerInterface::writeRefAttribute(Miniscript
+ 	} else if (attrib == "cursor") {
+ 		DynamicValueWriteFuncHelper<WorldManagerInterface, &WorldManagerInterface::setCursor, true>::create(this, result);
+ 		return kMiniscriptInstructionOutcomeContinue;
++	} else if (attrib == "cursorelement") {
++		// Not implemented, the element isn't used as the cursor
++		DynamicValueWriteDiscardHelper::create(result);
++		return kMiniscriptInstructionOutcomeContinue;
+ 	}
+ 	return RuntimeObject::writeRefAttribute(thread, result, attrib);
+ }
+-- 
+2.54.0 (Apple Git-157)
+

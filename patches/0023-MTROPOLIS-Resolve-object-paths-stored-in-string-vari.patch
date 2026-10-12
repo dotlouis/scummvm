@@ -1,0 +1,432 @@
+From f00680e4d06fa069643ba17a63428a5f21a0dbb7 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 11:31:37 -0700
+Subject: [PATCH 23/41] MTROPOLIS: Resolve object paths stored in string
+ variables
+
+Uncle Albert's Fabulous Voyage keeps references to notebook objects in
+string variables: it assigns an object to a string variable, and reads
+the object back with the variable's "object" attribute.
+
+Move the object path resolution of object reference variables to a new
+Runtime::resolveObjectPath(), which handles absolute and relative paths
+and loads scenes on the way. Assigning an object to a string variable
+now stores the object's absolute path, and the "object" attribute of a
+string variable resolves its path.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/modifiers.cpp       |  45 ++++++++-
+ engines/mtropolis/modifiers.h         |   2 +
+ engines/mtropolis/plugin/standard.cpp | 134 +-------------------------
+ engines/mtropolis/plugin/standard.h   |   2 -
+ engines/mtropolis/runtime.cpp         | 134 ++++++++++++++++++++++++++
+ engines/mtropolis/runtime.h           |   3 +
+ 6 files changed, 183 insertions(+), 137 deletions(-)
+
+diff --git a/engines/mtropolis/modifiers.cpp b/engines/mtropolis/modifiers.cpp
+index 369bdbd66c2..d34c5b8d2c6 100644
+--- a/engines/mtropolis/modifiers.cpp
++++ b/engines/mtropolis/modifiers.cpp
+@@ -3675,12 +3675,35 @@ bool StringVariableModifier::load(ModifierLoaderContext &context, const Data::St
+ }
+ 
+ bool StringVariableModifier::varSetValue(MiniscriptThread *thread, const DynamicValue &value) {
++	StringVariableStorage *storage = static_cast<StringVariableStorage *>(_storage.get());
++
++	DynamicValue derefValue = value.dereference();
++	if (derefValue.getType() == DynamicValueTypes::kObject) {
++		// An object is stored as its absolute path, which "object" resolves back
++		Common::SharedPtr<RuntimeObject> obj = derefValue.getObject().object.lock();
++		if (!obj)
++			return false;
++
++		Common::String path;
++		for (RuntimeObject *level = obj.get(); level;) {
++			if (level->isStructural()) {
++				path = "/" + static_cast<Structural *>(level)->getName() + path;
++				level = static_cast<Structural *>(level)->getParent();
++			} else if (level->isModifier()) {
++				path = "/" + static_cast<Modifier *>(level)->getName() + path;
++				level = static_cast<Modifier *>(level)->getParent().lock().get();
++			} else
++				return false;
++		}
++
++		storage->_value = path;
++		return true;
++	}
++
+ 	DynamicValue stringValue;
+-	if (!value.convertToType(DynamicValueTypes::kString, stringValue))
++	if (!derefValue.convertToType(DynamicValueTypes::kString, stringValue))
+ 		return false;
+ 
+-	StringVariableStorage *storage = static_cast<StringVariableStorage *>(_storage.get());
+-
+ 	storage->_value = stringValue.getString();
+ 
+ 	return true;
+@@ -3692,6 +3715,22 @@ void StringVariableModifier::varGetValue(DynamicValue &dest) const {
+ 	dest.setString(storage->_value);
+ }
+ 
++bool StringVariableModifier::readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) {
++	// A string holding an object path, such as the "path" of an object reference variable, resolves to that object
++	if (attrib == "object") {
++		StringVariableStorage *storage = static_cast<StringVariableStorage *>(_storage.get());
++
++		Common::SharedPtr<RuntimeObject> obj = thread->getRuntime()->resolveObjectPath(this, storage->_value).lock();
++		if (obj)
++			result.setObject(obj->getSelfReference());
++		else
++			result.clear();
++		return true;
++	}
++
++	return VariableModifier::readAttribute(thread, result, attrib);
++}
++
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ void StringVariableModifier::debugInspect(IDebugInspectionReport *report) const {
+ 	VariableModifier::debugInspect(report);
+diff --git a/engines/mtropolis/modifiers.h b/engines/mtropolis/modifiers.h
+index f7527d50bd1..16f152fe2e9 100644
+--- a/engines/mtropolis/modifiers.h
++++ b/engines/mtropolis/modifiers.h
+@@ -1459,6 +1459,8 @@ public:
+ 	bool varSetValue(MiniscriptThread *thread, const DynamicValue &value) override;
+ 	void varGetValue(DynamicValue &dest) const override;
+ 
++	bool readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) override;
++
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ 	const char *debugGetTypeName() const override { return "String Variable Modifier"; }
+ 	SupportStatus debugGetSupportStatus() const override { return kSupportStatusDone; }
+diff --git a/engines/mtropolis/plugin/standard.cpp b/engines/mtropolis/plugin/standard.cpp
+index 0455873e2fe..848dcf6fa17 100644
+--- a/engines/mtropolis/plugin/standard.cpp
++++ b/engines/mtropolis/plugin/standard.cpp
+@@ -657,10 +657,8 @@ void ObjectReferenceVariableModifier::resolve(Runtime *runtime) {
+ 	if (storage->_objectPath.size() == 0)
+ 		return;
+ 
+-	if (storage->_objectPath[0] == '/')
+-		resolveAbsolutePath(runtime);
+-	else if (storage->_objectPath[0] == '.')
+-		resolveRelativePath(runtime, this, storage->_objectPath, 0);
++	if (storage->_objectPath[0] == '/' || storage->_objectPath[0] == '.')
++		storage->_object.object = runtime->resolveObjectPath(this, storage->_objectPath);
+ 	else
+ 		warning("Object reference variable had an unknown path format");
+ 
+@@ -671,134 +669,6 @@ void ObjectReferenceVariableModifier::resolve(Runtime *runtime) {
+ 	}
+ }
+ 
+-void ObjectReferenceVariableModifier::resolveRelativePath(Runtime *runtime, RuntimeObject *obj, const Common::String &path, size_t startPos) {
+-	ObjectReferenceVariableStorage *storage = static_cast<ObjectReferenceVariableStorage *>(_storage.get());
+-
+-	bool haveNextLevel = true;
+-	size_t nextLevelPos = startPos;
+-
+-	while (haveNextLevel) {
+-		startPos = nextLevelPos;
+-		size_t endPos = path.find('/', startPos);
+-		if (endPos == Common::String::npos) {
+-			haveNextLevel = false;
+-			endPos = path.size();
+-		} else {
+-			nextLevelPos = endPos + 1;
+-		}
+-
+-		Common::String levelName = path.substr(startPos, endPos - startPos);
+-
+-		// This is technically more forgiving than mTropolis, which only allows ".." chains at the start of the path
+-		// Adjust this if it turns out to be a problem...
+-		if (levelName == "..") {
+-			obj = getObjectParent(obj);
+-			if (obj == nullptr)
+-				return;
+-
+-			continue;
+-		}
+-
+-		const Common::Array<Common::SharedPtr<Modifier> > *modifierChildren = nullptr;
+-		const Common::Array<Common::SharedPtr<Structural> > *structuralChildren = nullptr;
+-
+-		if (obj->isStructural()) {
+-			Structural *structural = static_cast<Structural *>(obj);
+-
+-			if (structural->getSceneLoadState() == Structural::SceneLoadState::kSceneNotLoaded)
+-				runtime->hotLoadScene(structural);
+-
+-			modifierChildren = &structural->getModifiers();
+-			structuralChildren = &structural->getChildren();
+-		} else if (obj->isModifier()) {
+-			Modifier *modifier = static_cast<Modifier *>(obj);
+-			IModifierContainer *childContainer = modifier->getChildContainer();
+-			if (childContainer)
+-				modifierChildren = &childContainer->getModifiers();
+-		}
+-
+-		bool foundMatch = false;
+-		if (modifierChildren) {
+-			for (const Common::SharedPtr<Modifier> &modifier : *modifierChildren) {
+-				if (caseInsensitiveEqual(levelName, modifier->getName())) {
+-					foundMatch = true;
+-					obj = modifier.get();
+-					break;
+-				}
+-			}
+-		}
+-		if (structuralChildren && !foundMatch) {
+-			for (const Common::SharedPtr<Structural> &structural : *structuralChildren) {
+-				if (caseInsensitiveEqual(levelName, structural->getName())) {
+-					foundMatch = true;
+-					obj = structural.get();
+-					break;
+-				}
+-			}
+-		}
+-
+-		if (!foundMatch)
+-			return;
+-	}
+-
+-	storage->_object.object = obj->getSelfReference();
+-}
+-
+-void ObjectReferenceVariableModifier::resolveAbsolutePath(Runtime *runtime) {
+-	ObjectReferenceVariableStorage *storage = static_cast<ObjectReferenceVariableStorage *>(_storage.get());
+-
+-	assert(storage->_objectPath[0] == '/');
+-
+-	RuntimeObject *project = this;
+-	for (;;) {
+-		RuntimeObject *parent = getObjectParent(project);
+-		if (!parent)
+-			break;
+-		project = parent;
+-	}
+-
+-	if (!project->isProject())
+-		return; // Some sort of detached object
+-
+-	size_t prefixEnd = 0;
+-
+-	bool foundPrefix = false;
+-
+-	if (runtime->getHacks().ignoreMismatchedProjectNameInObjectLookups) {
+-		size_t slashOffset = storage->_objectPath.findFirstOf('/', 1);
+-		if (slashOffset != Common::String::npos) {
+-			prefixEnd = slashOffset;
+-			foundPrefix = true;
+-		}
+-	} else {
+-		Common::String projectPrefixes[2] = {
+-			"/" + static_cast<Structural *>(project)->getName(),
+-			"/<project>"};
+-
+-		for (const Common::String &prefix : projectPrefixes) {
+-			if (storage->_objectPath.size() >= prefix.size() && caseInsensitiveEqual(storage->_objectPath.substr(0, prefix.size()), prefix)) {
+-				prefixEnd = prefix.size();
+-				foundPrefix = true;
+-				break;
+-			}
+-		}
+-	}
+-
+-	if (!foundPrefix)
+-		return;
+-
+-	// If the object path is longer, then there must be a slash separator, otherwise this doesn't match the project
+-	if (prefixEnd == storage->_objectPath.size()) {
+-		storage->_object = ObjectReference(project->getSelfReference());
+-		return;
+-	}
+-
+-	if (storage->_objectPath[prefixEnd] != '/')
+-		return;
+-
+-	return resolveRelativePath(runtime, project, storage->_objectPath, prefixEnd + 1);
+-}
+-
+ bool ObjectReferenceVariableModifier::computeObjectPath(RuntimeObject *obj, Common::String &outPath) {
+ 	Common::String pathForThis = "/";
+ 
+diff --git a/engines/mtropolis/plugin/standard.h b/engines/mtropolis/plugin/standard.h
+index 2d307168733..d518b35be65 100644
+--- a/engines/mtropolis/plugin/standard.h
++++ b/engines/mtropolis/plugin/standard.h
+@@ -203,8 +203,6 @@ private:
+ 	MiniscriptInstructionOutcome scriptObjectRefAttribIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, const Common::String &attrib, const DynamicValue &index);
+ 
+ 	void resolve(Runtime *runtime);
+-	void resolveRelativePath(Runtime *runtime, RuntimeObject *obj, const Common::String &path, size_t startPos);
+-	void resolveAbsolutePath(Runtime *runtime);
+ 
+ 	static bool computeObjectPath(RuntimeObject *obj, Common::String &outPath);
+ 	static RuntimeObject *getObjectParent(RuntimeObject *obj);
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 6ac031e07f0..a603c99f06f 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -7349,6 +7349,140 @@ void Runtime::queueChangeObjectParent(const Common::WeakPtr<RuntimeObject> &obj,
+ 	_pendingParentChanges.push_back(ObjectParentChange(obj, newParent));
+ }
+ 
++static RuntimeObject *getRuntimeObjectParent(RuntimeObject *obj) {
++	if (obj->isStructural())
++		return static_cast<Structural *>(obj)->getParent();
++	if (obj->isModifier())
++		return static_cast<Modifier *>(obj)->getParent().lock().get();
++	return nullptr;
++}
++
++static Common::WeakPtr<RuntimeObject> resolveRelativeObjectPath(Runtime *runtime, RuntimeObject *obj, const Common::String &path, size_t startPos) {
++	bool haveNextLevel = true;
++	size_t nextLevelPos = startPos;
++
++	while (haveNextLevel) {
++		startPos = nextLevelPos;
++		size_t endPos = path.find('/', startPos);
++		if (endPos == Common::String::npos) {
++			haveNextLevel = false;
++			endPos = path.size();
++		} else {
++			nextLevelPos = endPos + 1;
++		}
++
++		Common::String levelName = path.substr(startPos, endPos - startPos);
++
++		// This is technically more forgiving than mTropolis, which only allows ".." chains at the start of the path
++		if (levelName == "..") {
++			obj = getRuntimeObjectParent(obj);
++			if (obj == nullptr)
++				return Common::WeakPtr<RuntimeObject>();
++
++			continue;
++		}
++
++		const Common::Array<Common::SharedPtr<Modifier> > *modifierChildren = nullptr;
++		const Common::Array<Common::SharedPtr<Structural> > *structuralChildren = nullptr;
++
++		if (obj->isStructural()) {
++			Structural *structural = static_cast<Structural *>(obj);
++
++			if (structural->getSceneLoadState() == Structural::SceneLoadState::kSceneNotLoaded)
++				runtime->hotLoadScene(structural);
++
++			modifierChildren = &structural->getModifiers();
++			structuralChildren = &structural->getChildren();
++		} else if (obj->isModifier()) {
++			IModifierContainer *childContainer = static_cast<Modifier *>(obj)->getChildContainer();
++			if (childContainer)
++				modifierChildren = &childContainer->getModifiers();
++		}
++
++		bool foundMatch = false;
++		if (modifierChildren) {
++			for (const Common::SharedPtr<Modifier> &modifier : *modifierChildren) {
++				if (caseInsensitiveEqual(levelName, modifier->getName())) {
++					foundMatch = true;
++					obj = modifier.get();
++					break;
++				}
++			}
++		}
++		if (structuralChildren && !foundMatch) {
++			for (const Common::SharedPtr<Structural> &structural : *structuralChildren) {
++				if (caseInsensitiveEqual(levelName, structural->getName())) {
++					foundMatch = true;
++					obj = structural.get();
++					break;
++				}
++			}
++		}
++
++		if (!foundMatch)
++			return Common::WeakPtr<RuntimeObject>();
++	}
++
++	return obj->getSelfReference();
++}
++
++Common::WeakPtr<RuntimeObject> Runtime::resolveObjectPath(RuntimeObject *origin, const Common::String &path) {
++	if (path.empty())
++		return Common::WeakPtr<RuntimeObject>();
++
++	if (path[0] == '.')
++		return resolveRelativeObjectPath(this, origin, path, 0);
++
++	if (path[0] != '/')
++		return Common::WeakPtr<RuntimeObject>();
++
++	RuntimeObject *project = origin;
++	for (;;) {
++		RuntimeObject *parent = getRuntimeObjectParent(project);
++		if (!parent)
++			break;
++		project = parent;
++	}
++
++	if (!project->isProject())
++		return Common::WeakPtr<RuntimeObject>(); // Some sort of detached object
++
++	size_t prefixEnd = 0;
++	bool foundPrefix = false;
++
++	if (_hacks.ignoreMismatchedProjectNameInObjectLookups) {
++		size_t slashOffset = path.findFirstOf('/', 1);
++		if (slashOffset != Common::String::npos) {
++			prefixEnd = slashOffset;
++			foundPrefix = true;
++		}
++	} else {
++		Common::String projectPrefixes[2] = {
++			"/" + static_cast<Structural *>(project)->getName(),
++			"/<project>"};
++
++		for (const Common::String &prefix : projectPrefixes) {
++			if (path.size() >= prefix.size() && caseInsensitiveEqual(path.substr(0, prefix.size()), prefix)) {
++				prefixEnd = prefix.size();
++				foundPrefix = true;
++				break;
++			}
++		}
++	}
++
++	if (!foundPrefix)
++		return Common::WeakPtr<RuntimeObject>();
++
++	// If the object path is longer, then there must be a slash separator, otherwise this doesn't match the project
++	if (prefixEnd == path.size())
++		return project->getSelfReference();
++
++	if (path[prefixEnd] != '/')
++		return Common::WeakPtr<RuntimeObject>();
++
++	return resolveRelativeObjectPath(this, project, path, prefixEnd + 1);
++}
++
+ void Runtime::hotLoadScene(Structural *structural) {
+ 	assert(structural->getSceneLoadState() != Structural::SceneLoadState::kNotAScene);
+ 	loadScene(structural->getSelfReference().lock().staticCast<Structural>());
+diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
+index 66e9779f256..79910f39466 100644
+--- a/engines/mtropolis/runtime.h
++++ b/engines/mtropolis/runtime.h
+@@ -1724,6 +1724,9 @@ public:
+ 
+ 	void hotLoadScene(Structural *structural);
+ 
++	// Resolves an mTropolis object path, either absolute ("/<project>/section/...") or relative to an object ("../name")
++	Common::WeakPtr<RuntimeObject> resolveObjectPath(RuntimeObject *origin, const Common::String &path);
++
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ 	void debugSetEnabled(bool enabled);
+ 	void debugBreak();
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,88 @@
+From 75dfd358a33621bec102d27b6173082c2e51aaf0 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 17:31:14 -0700
+Subject: [PATCH 33/41] MTROPOLIS: Implement the Miniscript vector creation
+ instruction
+
+Opcode 0x131, "vector(angle, magnitude)", was an unimplemented
+instruction, so scripts that build vectors failed. Uncle Albert's
+Fabulous Voyage uses it to make the ladybug walk on the Zanzibar page.
+
+Create a vector with the angle in degrees, like the angle attribute of
+vectors and polar2rect.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/miniscript.cpp | 40 ++++++++++++++++++++++++++++++++
+ engines/mtropolis/miniscript.h   |  4 +++-
+ 2 files changed, 43 insertions(+), 1 deletion(-)
+
+diff --git a/engines/mtropolis/miniscript.cpp b/engines/mtropolis/miniscript.cpp
+index 26042df982b..7234a8c12f5 100644
+--- a/engines/mtropolis/miniscript.cpp
++++ b/engines/mtropolis/miniscript.cpp
+@@ -1392,6 +1392,46 @@ MiniscriptInstructionOutcome PointCreate::execute(MiniscriptThread *thread) cons
+ 	return kMiniscriptInstructionOutcomeContinue;
+ }
+ 
++MiniscriptInstructionOutcome VectorCreate::execute(MiniscriptThread *thread) const {
++	// vector(angle, magnitude), with the angle in degrees like the "angle" attribute of vectors
++	if (thread->getStackSize() < 2) {
++		thread->error("Stack underflow");
++		return kMiniscriptInstructionOutcomeFailed;
++	}
++
++	MiniscriptInstructionOutcome outcome = thread->dereferenceRValue(0);
++	if (outcome != kMiniscriptInstructionOutcomeContinue)
++		return outcome;
++
++	outcome = thread->dereferenceRValue(1);
++	if (outcome != kMiniscriptInstructionOutcomeContinue)
++		return outcome;
++
++	DynamicValue &magnitudeVal = thread->getStackValueFromTop(0).value;
++	DynamicValue &angleValDest = thread->getStackValueFromTop(1).value;
++
++	double components[2];
++	DynamicValue *inputs[2] = {&angleValDest, &magnitudeVal};
++
++	for (int i = 0; i < 2; i++) {
++		DynamicValue converted;
++		if (!inputs[i]->convertToType(DynamicValueTypes::kFloat, converted)) {
++			thread->error("Invalid input for vector creation");
++			return kMiniscriptInstructionOutcomeFailed;
++		}
++		components[i] = converted.getFloat();
++	}
++
++	AngleMagVector vec;
++	vec.angleDegrees = components[0];
++	vec.magnitude = components[1];
++	angleValDest.setVector(vec);
++
++	thread->popValues(1);
++
++	return kMiniscriptInstructionOutcomeContinue;
++}
++
+ MiniscriptInstructionOutcome RangeCreate::execute(MiniscriptThread *thread) const {
+ 	if (thread->getStackSize() < 2) {
+ 		thread->error("Stack underflow");
+diff --git a/engines/mtropolis/miniscript.h b/engines/mtropolis/miniscript.h
+index 4b40e6f6e29..8856e2f22bd 100644
+--- a/engines/mtropolis/miniscript.h
++++ b/engines/mtropolis/miniscript.h
+@@ -301,7 +301,9 @@ namespace MiniscriptInstructions {
+ 		MiniscriptInstructionOutcome execute(MiniscriptThread *thread) const override;
+ 	};
+ 
+-	class VectorCreate : public UnimplementedInstruction {
++	class VectorCreate : public MiniscriptInstruction {
++	private:
++		MiniscriptInstructionOutcome execute(MiniscriptThread *thread) const override;
+ 	};
+ 
+ 	class GetChild : public MiniscriptInstruction {
+-- 
+2.54.0 (Apple Git-157)
+

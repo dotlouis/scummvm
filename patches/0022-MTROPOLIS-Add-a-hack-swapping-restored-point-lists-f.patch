@@ -1,0 +1,172 @@
+From 8d677e6fb8818ae17e2b32e8c6c564473a0d03af Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 10:19:41 -0700
+Subject: [PATCH 22/41] MTROPOLIS: Add a hack swapping restored point lists for
+ Uncle Albert's Fabulous Voyage
+
+The original player stores the points of list variables as Y, X in the
+variable files written by the Save and Restore modifier, and the game
+swaps the coordinates of its object, plate and photo position lists back
+after loading them. ScummVM saves keep points as they are, so the game's
+swap put every notebook object of a resumed game at the wrong position.
+
+When a Save and Restore modifier loads a ScummVM save, swap the
+coordinates of the restored point lists for this game, so that they
+reach the game the way the original files did. Variable files from the
+game directory already load that way.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/hacks.cpp           |  1 +
+ engines/mtropolis/hacks.h             |  4 ++++
+ engines/mtropolis/modifiers.cpp       | 17 +++++++++++++++--
+ engines/mtropolis/mtropolis.cpp       |  1 +
+ engines/mtropolis/plugin/standard.cpp | 14 ++++++++++++++
+ engines/mtropolis/plugin/standard.h   |  1 +
+ engines/mtropolis/runtime.cpp         |  3 +++
+ engines/mtropolis/runtime.h           |  3 +++
+ 8 files changed, 42 insertions(+), 2 deletions(-)
+
+diff --git a/engines/mtropolis/hacks.cpp b/engines/mtropolis/hacks.cpp
+index 033f418e6a2..2481a92985b 100644
+--- a/engines/mtropolis/hacks.cpp
++++ b/engines/mtropolis/hacks.cpp
+@@ -47,6 +47,7 @@ Hacks::Hacks() {
+ 	mtiHispaniolaDamagedStringHack = false;
+ 	ignoreSceneUnloads = false;
+ 	deferParentChangesToEndOfNextFrame = false;
++	swapRestoredPointLists = false;
+ }
+ 
+ Hacks::~Hacks() {
+diff --git a/engines/mtropolis/hacks.h b/engines/mtropolis/hacks.h
+index 515ca3bb059..2f11219f15e 100644
+--- a/engines/mtropolis/hacks.h
++++ b/engines/mtropolis/hacks.h
+@@ -63,6 +63,10 @@ struct Hacks {
+ 	// changes, and expects them after the loop that clones them has ended.
+ 	bool deferParentChangesToEndOfNextFrame;
+ 
++	// Point lists restored from ScummVM saves get their X and Y swapped, like the variable files of the original
++	// player, because the game swaps them back after loading.
++	bool swapRestoredPointLists;
++
+ 	uint midiVolumeScale;	// 256 = 1.0
+ 
+ 	uint32 minTransitionDuration;
+diff --git a/engines/mtropolis/modifiers.cpp b/engines/mtropolis/modifiers.cpp
+index 235154edc4e..369bdbd66c2 100644
+--- a/engines/mtropolis/modifiers.cpp
++++ b/engines/mtropolis/modifiers.cpp
+@@ -71,6 +71,15 @@ bool CompoundVarLoader::readSave(Common::ReadStream *stream, uint32 saveFileVers
+ 	return true;
+ }
+ 
++static void recursiveSwapPointCoordinates(Modifier *modifier) {
++	if (modifier->isCompoundVariable()) {
++		for (const Common::SharedPtr<Modifier> &child : modifier->getChildContainer()->getModifiers())
++			recursiveSwapPointCoordinates(child.get());
++	} else if (modifier->isVariable()) {
++		static_cast<VariableModifier *>(modifier)->varSwapPointCoordinates();
++	}
++}
++
+ // Copies variable values from a variable loaded from an mTropolis variable file into a project variable
+ static bool transferVariableState(Runtime *runtime, Modifier *dest, Modifier *src) {
+ 	if (dest->isCompoundVariable() && src->isCompoundVariable()) {
+@@ -495,9 +504,13 @@ VThreadState SaveAndRestoreModifier::consumeMessage(Runtime *runtime, const Comm
+ 		bool succeeded = false;
+ 		if (isPrompt)
+ 			succeeded = runtime->getLoadProvider()->promptLoad(&loader);
+-		else if (runtime->getLoadProvider()->namedSaveExists(_fileName))
++		else if (runtime->getLoadProvider()->namedSaveExists(_fileName)) {
+ 			succeeded = runtime->getLoadProvider()->namedLoad(&loader, _fileName);
+-		else {
++
++			// The original stores points as Y, X in variable files and some games swap them back after loading
++			if (succeeded && runtime->getHacks().swapRestoredPointLists)
++				recursiveSwapPointCoordinates(static_cast<Modifier *>(obj));
++		} else {
+ 			// No save yet, use the file from the game directory if there is one
+ 			Common::SharedPtr<Modifier> fileVar = runtime->getProject()->loadVariableFile(_filePath, _fileName);
+ 			if (fileVar)
+diff --git a/engines/mtropolis/mtropolis.cpp b/engines/mtropolis/mtropolis.cpp
+index ae300a53f1f..c91ea8efb1f 100644
+--- a/engines/mtropolis/mtropolis.cpp
++++ b/engines/mtropolis/mtropolis.cpp
+@@ -326,6 +326,7 @@ Common::Error MTropolisEngine::run() {
+ 		}
+ 	} else if (_gameDescription->gameID == GID_ALBERT2) {
+ 		_runtime->getHacks().deferParentChangesToEndOfNextFrame = true;
++		_runtime->getHacks().swapRestoredPointLists = true;
+ 	} else if (_gameDescription->gameID == GID_MTI) {
+ 		HackSuites::addMTIQuirks(*_gameDescription, _runtime->getHacks());
+ 	} else if (_gameDescription->gameID == GID_UNIT) {
+diff --git a/engines/mtropolis/plugin/standard.cpp b/engines/mtropolis/plugin/standard.cpp
+index 576106e5eb4..0455873e2fe 100644
+--- a/engines/mtropolis/plugin/standard.cpp
++++ b/engines/mtropolis/plugin/standard.cpp
+@@ -971,6 +971,20 @@ bool ListVariableModifier::isListVariable() const {
+ 	return true;
+ }
+ 
++void ListVariableModifier::varSwapPointCoordinates() {
++	ListVariableStorage *storage = static_cast<ListVariableStorage *>(_storage.get());
++
++	if (storage->_list->getType() != DynamicValueTypes::kPoint)
++		return;
++
++	storage->_list = storage->_list->clone();
++	for (Common::Point &pt : storage->_list->getPoint()) {
++		int16 x = pt.x;
++		pt.x = pt.y;
++		pt.y = x;
++	}
++}
++
+ bool ListVariableModifier::varSetValue(MiniscriptThread *thread, const DynamicValue &value) {
+ 	ListVariableStorage *storage = static_cast<ListVariableStorage *>(_storage.get());
+ 
+diff --git a/engines/mtropolis/plugin/standard.h b/engines/mtropolis/plugin/standard.h
+index 7fd71a7867a..2d307168733 100644
+--- a/engines/mtropolis/plugin/standard.h
++++ b/engines/mtropolis/plugin/standard.h
+@@ -282,6 +282,7 @@ public:
+ 	void varGetValue(DynamicValue &dest) const override;
+ 
+ 	bool isListVariable() const override;
++	void varSwapPointCoordinates() override;
+ 
+ 	bool readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) override;
+ 	bool readAttributeIndexed(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib, const DynamicValue &index) override;
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 62792becb1b..6ac031e07f0 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -10630,6 +10630,9 @@ bool VariableModifier::readAttribute(MiniscriptThread *thread, DynamicValue &res
+ void VariableModifier::disable(Runtime *runtime) {
+ }
+ 
++void VariableModifier::varSwapPointCoordinates() {
++}
++
+ DynamicValueWriteProxy VariableModifier::createWriteProxy() {
+ 	DynamicValueWriteProxy proxy;
+ 	proxy.pod.objectRef = this;
+diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
+index 42349a8d319..66e9779f256 100644
+--- a/engines/mtropolis/runtime.h
++++ b/engines/mtropolis/runtime.h
+@@ -3169,6 +3169,9 @@ public:
+ 	virtual bool varSetValue(MiniscriptThread *thread, const DynamicValue &value) = 0;
+ 	virtual void varGetValue(DynamicValue &dest) const = 0;
+ 
++	// Swaps the X and Y coordinates of the points the variable holds, for game-specific save compatibility
++	virtual void varSwapPointCoordinates();
++
+ 	bool readAttribute(MiniscriptThread *thread, DynamicValue &result, const Common::String &attrib) override;
+ 
+ 	void disable(Runtime *runtime) override;
+-- 
+2.54.0 (Apple Git-157)
+

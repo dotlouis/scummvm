@@ -1,0 +1,34 @@
+From 42ed8cad763c880f062c189455769b1ea74824de Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 15:39:37 -0700
+Subject: [PATCH 31/41] MTROPOLIS: Remove expired elements from the right
+ collision list
+
+When an element that was colliding no longer exists, checkCollisions
+removed its index from the list of new collisions instead of the list
+of old ones. With fewer new collisions than old ones this failed the
+"idx < _size" assertion of Common::Array::remove_at. It happened in
+Uncle Albert's Fabulous Voyage when turning to the Cairo page with a
+photo in the margin.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index b7b907b9eb3..052c9b02e8a 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -7052,7 +7052,7 @@ void Runtime::checkCollisions(ICollider *optRestrictToCollider) {
+ 		for (size_t oldIndex = 0; oldIndex < oldCollidingElements.size();) {
+ 			Common::SharedPtr<VisualElement> oldColElement = oldCollidingElements[oldIndex].lock();
+ 			if (oldColElement.get() == nullptr) {
+-				collidingElements.remove_at(oldIndex);
++				oldCollidingElements.remove_at(oldIndex);
+ 				continue;
+ 			}
+ 
+-- 
+2.54.0 (Apple Git-157)
+

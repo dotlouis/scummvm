@@ -1,0 +1,52 @@
+From 76d88a4556b20a233a4298a38a51430c578242dd Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 11:31:44 -0700
+Subject: [PATCH 25/41] MTROPOLIS: Read read-only object attributes in l-value
+ paths
+
+In "set source.parent.element.globalposition to ...", every attribute
+of the path is fetched as an l-value, and the read-only "element"
+attribute of the parent failed with "Can't write to attribute". This
+broke placing a photo in its frame in Uncle Albert's Fabulous Voyage.
+
+When an object attribute in the middle of an l-value path can't be
+written, read it instead, and apply the rest of the path to the object
+it holds.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 18 +++++++++++++++++-
+ 1 file changed, 17 insertions(+), 1 deletion(-)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 26b75dab71d..6f2f34fcfd5 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -2215,7 +2215,23 @@ MiniscriptInstructionOutcome DynamicValueWriteObjectHelper::write(MiniscriptThre
+ }
+ 
+ MiniscriptInstructionOutcome DynamicValueWriteObjectHelper::refAttrib(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib) {
+-	return static_cast<RuntimeObject *>(objectRef)->writeRefAttribute(thread, proxy, attrib);
++	RuntimeObject *obj = static_cast<RuntimeObject *>(objectRef);
++	MiniscriptInstructionOutcome outcome = obj->writeRefAttribute(thread, proxy, attrib);
++	if (outcome != kMiniscriptInstructionOutcomeFailed)
++		return outcome;
++
++	// A read-only attribute in the middle of an l-value path, like "element" in
++	// "source.parent.element.position", is read: if it is an object, the rest of the path applies to that object.
++	DynamicValue value;
++	if (obj->readAttribute(thread, value, attrib) && value.getType() == DynamicValueTypes::kObject) {
++		Common::SharedPtr<RuntimeObject> target = value.getObject().object.lock();
++		if (target) {
++			create(target.get(), proxy);
++			return kMiniscriptInstructionOutcomeContinue;
++		}
++	}
++
++	return kMiniscriptInstructionOutcomeFailed;
+ }
+ 
+ MiniscriptInstructionOutcome DynamicValueWriteObjectHelper::refAttribIndexed(MiniscriptThread *thread, DynamicValueWriteProxy &proxy, void *objectRef, uintptr ptrOrOffset, const Common::String &attrib, const DynamicValue &index) {
+-- 
+2.54.0 (Apple Git-157)
+

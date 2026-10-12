@@ -1,0 +1,58 @@
+From 1772d173ba6fd56b892f1f3ba5414128a169d000 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 01:25:08 -0700
+Subject: [PATCH 09/41] MTROPOLIS: Compare object reference variables by the
+ object they reference
+
+Object reference variables evaluate to the variable itself so that
+their attributes can be read, which made comparisons such as
+"curseur = null" always false. Compare the referenced object instead
+when a variable exposes one through its "object" attribute.
+
+Uncle Albert's Fabulous Voyage guards its exit button and other actions
+with "sharedScene.curseur = null", meaning that no tool is being held.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/miniscript.cpp | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/engines/mtropolis/miniscript.cpp b/engines/mtropolis/miniscript.cpp
+index e986718a43b..26042df982b 100644
+--- a/engines/mtropolis/miniscript.cpp
++++ b/engines/mtropolis/miniscript.cpp
+@@ -779,6 +779,21 @@ MiniscriptInstructionOutcome Modulo::arithExecute(MiniscriptThread *thread, doub
+ 	return kMiniscriptInstructionOutcomeContinue;
+ }
+ 
++// Object reference variables evaluate to themselves so their attributes can be used, but comparisons
++// such as "objectref = null" are about the object they reference.
++static void resolveReferencedObject(MiniscriptThread *thread, DynamicValue &value) {
++	if (value.getType() != DynamicValueTypes::kObject)
++		return;
++
++	Common::SharedPtr<RuntimeObject> obj = value.getObject().object.lock();
++	if (!obj || !obj->isModifier() || !static_cast<Modifier *>(obj.get())->isVariable())
++		return;
++
++	DynamicValue referenced;
++	if (obj->readAttribute(thread, referenced, "object"))
++		value = referenced;
++}
++
+ MiniscriptInstructionOutcome UnorderedCompareInstruction::execute(MiniscriptThread *thread) const {
+ 	if (thread->getStackSize() < 2) {
+ 		thread->error("Stack underflow");
+@@ -796,6 +811,9 @@ MiniscriptInstructionOutcome UnorderedCompareInstruction::execute(MiniscriptThre
+ 	DynamicValue &rs = thread->getStackValueFromTop(0).value;
+ 	DynamicValue &lsDest = thread->getStackValueFromTop(1).value;
+ 
++	resolveReferencedObject(thread, rs);
++	resolveReferencedObject(thread, lsDest);
++
+ 	bool isEqual = false;
+ 	bool isUndefined = false;
+ 	switch (lsDest.getType()) {
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,38 @@
+From f578a68c601ae551b935ccb19c80f25b08ae37c1 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 10 Oct 2026 11:31:44 -0700
+Subject: [PATCH 24/41] MTROPOLIS: Handle Clone and Kill command messages
+
+Clone and Kill are commands, but structural elements ignored them when
+they arrived as messages ("Command type 226 was ignored"), and only the
+"clone" and "kill" attributes worked. Uncle Albert's Fabulous Voyage
+sends a Clone message to a developed photo to put a copy of it in the
+notebook, so the photo never appeared.
+
+Queue the clone or kill of the element, like the attributes do.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index a603c99f06f..26b75dab71d 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -3886,6 +3886,12 @@ CORO_BEGIN_DEFINITION(Structural::StructuralConsumeCommandCoroutine)
+ 
+ 			CORO_CALL(Runtime::SendMessageOnVThreadCoroutine, params->runtime, dispatch);
+ 
++			CORO_RETURN;
++		CORO_ELSE_IF(Event(EventIDs::kClone, 0).respondsTo(params->msg->getEvent()))
++			params->runtime->queueCloneObject(params->self->getSelfReference());
++			CORO_RETURN;
++		CORO_ELSE_IF(Event(EventIDs::kKill, 0).respondsTo(params->msg->getEvent()))
++			params->runtime->queueKillObject(params->self->getSelfReference());
+ 			CORO_RETURN;
+ 		CORO_ELSE_IF(params->msg->getEvent().eventType == EventIDs::kAttribSet)
+ 			locals->attribID = params->msg->getEvent().eventInfo;
+-- 
+2.54.0 (Apple Git-157)
+

@@ -1,0 +1,53 @@
+From 422ab740a08470538b6d8288e7f3fb09d765dbae Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 01:04:57 -0700
+Subject: [PATCH 36/41] MTROPOLIS: Propagate messages to the variables of
+ compound variables
+
+Messages only reached the children of behaviors. Object reference
+variables inside a compound variable never saw the event that sets them
+to the source's parent. Uncle Albert's Fabulous Voyage records the
+object that asked for a clone this way; the clone then reports back to
+it. Without it, the clone's reply had no destination, and the sorcerer's
+paper never counted the toads it produced.
+
+Let compound variables pass messages on to their variables.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/modifiers.cpp | 6 ++++++
+ engines/mtropolis/modifiers.h   | 1 +
+ 2 files changed, 7 insertions(+)
+
+diff --git a/engines/mtropolis/modifiers.cpp b/engines/mtropolis/modifiers.cpp
+index d34c5b8d2c6..77e7d482994 100644
+--- a/engines/mtropolis/modifiers.cpp
++++ b/engines/mtropolis/modifiers.cpp
+@@ -2892,6 +2892,12 @@ IModifierContainer *CompoundVariableModifier::getChildContainer() {
+ 	return this;
+ }
+ 
++// Messages reach the variables in a compound variable, so an object reference variable in it can be set to the
++// source's parent. Uncle Albert's Fabulous Voyage keeps the object that asked for a clone this way.
++IModifierContainer *CompoundVariableModifier::getMessagePropagationContainer() {
++	return this;
++}
++
+ const Common::Array<Common::SharedPtr<Modifier> > &CompoundVariableModifier::getModifiers() const {
+ 	return _children;
+ }
+diff --git a/engines/mtropolis/modifiers.h b/engines/mtropolis/modifiers.h
+index 16f152fe2e9..d50b3e79a1c 100644
+--- a/engines/mtropolis/modifiers.h
++++ b/engines/mtropolis/modifiers.h
+@@ -1112,6 +1112,7 @@ public:
+ 	Common::SharedPtr<ModifierSaveLoad> getSaveLoad(Runtime *runtime) override;
+ 
+ 	IModifierContainer *getChildContainer() override;
++	IModifierContainer *getMessagePropagationContainer() override;
+ 
+ 	bool isCompoundVariable() const override { return true; }
+ 
+-- 
+2.54.0 (Apple Git-157)
+
