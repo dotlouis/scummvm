@@ -3304,6 +3304,7 @@ MiniscriptInstructionOutcome SystemInterface::setMasterVolume(MiniscriptThread *
 	else if (asInteger > kFullVolume)
 		asInteger = kFullVolume;
 
+	_masterVolume = asInteger;
 	thread->getRuntime()->setVolume(static_cast<double>(asInteger) / kFullVolume);
 
 	return kMiniscriptInstructionOutcomeContinue;
