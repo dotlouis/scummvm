@@ -1,0 +1,145 @@
+From b685b14b2e486c12ab6edd5d6fbc08cc09a3a966 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 09:40:36 +0200
+Subject: [PATCH 46/47] MTROPOLIS: Add a hack for the name screen arrow keys of
+ Uncle Albert's Fabulous Voyage
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+The name screen says to pick a saved player with the up and down arrows
+("flèches haut et bas"), but only its on-screen arrow buttons respond:
+there is no keyboard messenger for the arrow keys, so players who used
+the keyboard could not find their saved game.
+
+Add a hack that makes a key press click an element of a scene (Mouse
+Down, Mouse Up, Mouse Up Inside), and use it for the up and down keys on
+the name screen ("bouton_haut" and "bouton_bas" of "liste_nom").
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/hacks.h       | 12 +++++++++
+ engines/mtropolis/mtropolis.cpp |  2 ++
+ engines/mtropolis/runtime.cpp   | 43 +++++++++++++++++++++++++++++++++
+ engines/mtropolis/runtime.h     |  1 +
+ 4 files changed, 58 insertions(+)
+
+diff --git a/engines/mtropolis/hacks.h b/engines/mtropolis/hacks.h
+index 9e792beec3..5362afec5a 100644
+--- a/engines/mtropolis/hacks.h
++++ b/engines/mtropolis/hacks.h
+@@ -25,6 +25,8 @@
+ #include "common/rect.h"
+ #include "common/ptr.h"
+ #include "common/hashmap.h"
++#include "common/keyboard.h"
++#include "common/str.h"
+ 
+ namespace MTropolis {
+ 
+@@ -77,6 +79,16 @@ struct Hacks {
+ 	// tool bound to a sound effect modifier also named "cardass", so the frame stayed around the object.
+ 	bool modifierVisibleWritesGoToSameNamedElement;
+ 
++	// Pressing a key clicks an element of a scene (Mouse Down, Mouse Up, Mouse Up Inside). Uncle Albert's Fabulous Voyage
++	// tells players to pick their name with the up and down arrows ("flèches haut et bas") on its name screen, but
++	// only its on-screen arrow buttons respond.
++	struct KeyClicksElement {
++		Common::KeyCode key;
++		Common::String sceneName;
++		Common::String elementName;
++	};
++	Common::Array<KeyClicksElement> keyClicksElements;
++
+ 	uint midiVolumeScale;	// 256 = 1.0
+ 
+ 	uint32 minTransitionDuration;
+diff --git a/engines/mtropolis/mtropolis.cpp b/engines/mtropolis/mtropolis.cpp
+index ede6f7bfe5..72936807f3 100644
+--- a/engines/mtropolis/mtropolis.cpp
++++ b/engines/mtropolis/mtropolis.cpp
+@@ -329,6 +329,8 @@ Common::Error MTropolisEngine::run() {
+ 		_runtime->getHacks().swapRestoredPointLists = true;
+ 		_runtime->getHacks().attribSetVisibleShowsAndHides = true;
+ 		_runtime->getHacks().modifierVisibleWritesGoToSameNamedElement = true;
++		_runtime->getHacks().keyClicksElements.push_back(Hacks::KeyClicksElement{Common::KEYCODE_UP, "liste_nom", "bouton_haut"});
++		_runtime->getHacks().keyClicksElements.push_back(Hacks::KeyClicksElement{Common::KEYCODE_DOWN, "liste_nom", "bouton_bas"});
+ 	} else if (_gameDescription->gameID == GID_MTI) {
+ 		HackSuites::addMTIQuirks(*_gameDescription, _runtime->getHacks());
+ 	} else if (_gameDescription->gameID == GID_UNIT) {
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 1c5197c377..52dabf6aff 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -4777,6 +4777,8 @@ bool Runtime::runFrame() {
+ 					}
+ 
+ 					_project->onKeyboardEvent(this, *static_cast<KeyboardInputEvent *>(evt.get()));
++
++					sendKeyClicks(*static_cast<KeyboardInputEvent *>(evt.get()));
+ 				}
+ 				break;
+ 			case kOSEventTypeMouseDown:
+@@ -6894,6 +6896,47 @@ void Runtime::onMouseUp(int32 x, int32 y, Actions::MouseButton mButton) {
+ 		_mouseFocusWindow.reset();
+ }
+ 
++static Structural *findVisibleElementByName(Structural *structural, const Common::String &name) {
++	if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
++		if (!static_cast<VisualElement *>(structural)->isVisible())
++			return nullptr;
++		if (caseInsensitiveEqual(structural->getName(), name))
++			return structural;
++	}
++
++	for (const Common::SharedPtr<Structural> &child : structural->getChildren()) {
++		if (Structural *found = findVisibleElementByName(child.get(), name))
++			return found;
++	}
++
++	return nullptr;
++}
++
++// Clicks the element that a key press clicks, see Hacks::keyClicksElements
++void Runtime::sendKeyClicks(const KeyboardInputEvent &keyEvt) {
++	if (keyEvt.getKeyEventType() != Common::EVENT_KEYDOWN || keyEvt.isRepeat() || !_activeMainScene)
++		return;
++
++	for (const Hacks::KeyClicksElement &keyClick : _hacks.keyClicksElements) {
++		if (keyClick.key != keyEvt.getKeyState().keycode || !caseInsensitiveEqual(_activeMainScene->getName(), keyClick.sceneName))
++			continue;
++
++		Structural *target = findVisibleElementByName(_activeMainScene.get(), keyClick.elementName);
++		if (!target)
++			continue;
++
++		// A whole click: Mouse Down, Mouse Up, Mouse Up Inside (pushed in reverse since VThread tasks run last in first)
++		const EventIDs::EventID clickEvents[] = {EventIDs::kMouseUpInside, EventIDs::kMouseUp, EventIDs::kMouseDown};
++		DynamicValue mousePtValue;
++		mousePtValue.setPoint(_cachedMousePosition);
++		for (EventIDs::EventID eventID : clickEvents) {
++			Common::SharedPtr<MessageProperties> props(new MessageProperties(Event(eventID, 0), mousePtValue, nullptr));
++			Common::SharedPtr<MessageDispatch> dispatch(new MessageDispatch(props, target, false, true, false));
++			sendMessageOnVThread(dispatch);
++		}
++	}
++}
++
+ void Runtime::onKeyboardEvent(const Common::EventType evtType, bool repeat, const Common::KeyState &keyEvt) {
+ 	Common::SharedPtr<Window> focusWindow = _keyFocusWindow.lock();
+ 	if (focusWindow)
+diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
+index 177275bc82..b9bd204a7f 100644
+--- a/engines/mtropolis/runtime.h
++++ b/engines/mtropolis/runtime.h
+@@ -1692,6 +1692,7 @@ public:
+ 
+ 	void setCursorElement(const Common::WeakPtr<VisualElement> &element);
+ 	void setCursorElementHotspot(const Common::Point &hotspot);
++	void sendKeyClicks(const KeyboardInputEvent &keyEvt);
+ 	void updateCursorElementPosition();
+ 
+ 	void addBoundaryDetector(IBoundaryDetector *boundaryDetector);
+-- 
+2.47.3
+

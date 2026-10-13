@@ -1,7 +1,7 @@
-From a57bea547a8c37a4844ea437d7d899ccba5193d8 Mon Sep 17 00:00:00 2001
+From a3a40a06902aca63a968877e756344039d09062d Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 16:38:31 -0700
-Subject: [PATCH 46/46] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
+Subject: [PATCH 47/47] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
  for upstream)
 
 Local reverse-engineering tools, not meant to be submitted:
@@ -2637,7 +2637,7 @@ index 32bf8ddf1b..1ebac87deb 100644
  	core.o \
  	coroutine_exec.o \
 diff --git a/engines/mtropolis/mtropolis.cpp b/engines/mtropolis/mtropolis.cpp
-index ede6f7bfe5..2f35dcbbaf 100644
+index 72936807f3..71a28266c1 100644
 --- a/engines/mtropolis/mtropolis.cpp
 +++ b/engines/mtropolis/mtropolis.cpp
 @@ -43,6 +43,7 @@
@@ -2648,7 +2648,7 @@ index ede6f7bfe5..2f35dcbbaf 100644
  #include "mtropolis/boot.h"
  #include "mtropolis/debug.h"
  #include "mtropolis/runtime.h"
-@@ -338,9 +339,14 @@ Common::Error MTropolisEngine::run() {
+@@ -340,9 +341,14 @@ Common::Error MTropolisEngine::run() {
  	}
  
  
@@ -2676,7 +2676,7 @@ index 558f400119..d4585085d4 100644
  }
  
 diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
-index 1c5197c377..c85dc13c53 100644
+index 52dabf6aff..94b0f3ae41 100644
 --- a/engines/mtropolis/runtime.cpp
 +++ b/engines/mtropolis/runtime.cpp
 @@ -4124,6 +4124,34 @@ MiniscriptInstructionOutcome Structural::scriptSetLoop(MiniscriptThread *thread,
@@ -2786,7 +2786,7 @@ index 1c5197c377..c85dc13c53 100644
  }
  
  const Common::SharedPtr<MessageProperties> &MessageDispatch::getMsg() const {
-@@ -6021,12 +6100,71 @@ void Runtime::recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLa
+@@ -6023,12 +6102,71 @@ void Runtime::recursiveFindMouseCollision(Structural *&bestResult, int32 &bestLa
  		recursiveFindMouseCollision(bestResult, bestLayer, bestStackHeight, bestDirect, child.get(), stackHeight, childRelativeX, childRelativeY, testType, cursorElement);
  }
  
@@ -2858,7 +2858,7 @@ index 1c5197c377..c85dc13c53 100644
  void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
  	assert(scene->getSceneLoadState() != Structural::SceneLoadState::kNotAScene);
  
-@@ -6046,6 +6184,8 @@ void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
+@@ -6048,6 +6186,8 @@ void Runtime::loadScene(const Common::SharedPtr<Structural> &scene) {
  			debug(1, "Scene loaded OK, materializing objects...");
  			scene->materializeDescendents(this, subsection->getSceneLoadMaterializeScope());
  			debug(1, "Scene materialized OK");
@@ -2867,7 +2867,7 @@ index 1c5197c377..c85dc13c53 100644
  		}
  
  		recursiveActivateStructural(scene.get());
-@@ -6534,6 +6674,7 @@ VThreadState Runtime::updateMouseStateTask(const UpdateMouseStateTaskData &data)
+@@ -6536,6 +6676,7 @@ VThreadState Runtime::updateMouseStateTask(const UpdateMouseStateTaskData &data)
  			recursiveFindMouseCollision(tracked, bestSceneStack, bestLayer, bestDirect, sceneStackEntry.scene.get(), _sceneStack.size() - 1 - ri, _cachedMousePosition.x, _cachedMousePosition.y, kMouseInteractivityTestMouseClick, _elementTrackedToCursor.lock().get());
  		}
  
@@ -2876,10 +2876,10 @@ index 1c5197c377..c85dc13c53 100644
  			_mouseTrackingObject = tracked->getSelfReference().staticCast<Structural>();
  			_mouseTrackingDragStart = _cachedMousePosition;
 diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
-index 177275bc82..0a30f91e1a 100644
+index b9bd204a7f..8f1f30382e 100644
 --- a/engines/mtropolis/runtime.h
 +++ b/engines/mtropolis/runtime.h
-@@ -1730,6 +1730,9 @@ public:
+@@ -1731,6 +1731,9 @@ public:
  
  #ifdef MTROPOLIS_DEBUG_ENABLE
  	void debugSetEnabled(bool enabled);
