@@ -10001,7 +10001,9 @@ bool VisualElement::renderTransformed(Window *window, const Graphics::ManagedSur
 		Common::Point offset(0, 0);	// Position of the result relative to the pivot
 		if (angle != 0) {
 			const Common::Point pivotInSource(pivot.x - scaledOrigin.x, pivot.y - scaledOrigin.y);
-			Graphics::TransformStruct transform(100, 100, static_cast<uint32>(angle), pivotInSource.x, pivotInSource.y);
+			// Rotator angles turn counterclockwise, like the angles of vector motion (90 degrees is up), while
+			// TransformStruct turns clockwise on screen
+			Graphics::TransformStruct transform(100, 100, static_cast<uint32>((360 - angle) % 360), pivotInSource.x, pivotInSource.y);
 			Common::Point rotatedPivot;
 			Graphics::TransformTools::newRect(Common::Rect(result->w, result->h), transform, &rotatedPivot);
 			Graphics::Surface *rotated = result->rotoscale(transform, false);
