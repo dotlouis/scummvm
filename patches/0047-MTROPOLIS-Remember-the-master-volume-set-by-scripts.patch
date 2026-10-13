@@ -1,0 +1,32 @@
+From 55c68d0e7cb5f9c59a80fa71168fe2aad21ad345 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 10:38:57 +0200
+Subject: [PATCH 47/48] MTROPOLIS: Remember the master volume set by scripts
+
+Setting "system.mastervolume" changed the mixer volume but the attribute
+kept reading 7 (full volume).
+
+Uncle Albert's Fabulous Voyage sets it from its trumpet slider in the
+album margin: dragging the trumpet down now reads back the volume that
+was set.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index 52dabf6aff..0149bea369 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -3304,6 +3304,7 @@ MiniscriptInstructionOutcome SystemInterface::setMasterVolume(MiniscriptThread *
+ 	else if (asInteger > kFullVolume)
+ 		asInteger = kFullVolume;
+ 
++	_masterVolume = asInteger;
+ 	thread->getRuntime()->setVolume(static_cast<double>(asInteger) / kFullVolume);
+ 
+ 	return kMiniscriptInstructionOutcomeContinue;
+-- 
+2.47.3
+
