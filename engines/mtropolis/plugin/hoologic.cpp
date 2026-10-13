@@ -399,9 +399,18 @@ void DisplayBitmapModifier::setDisplayed(Runtime *runtime, bool displayed) {
 	// The element draws the current contents of the variable, so later changes to the bitmap are displayed too
 	VisualElement *element = static_cast<VisualElement *>(owner);
 	BitmapVariableModifier *bitmapVar = displayed ? BitmapVariableModifier::resolve(_bitmapVar) : nullptr;
-	if (bitmapVar)
+	if (bitmapVar) {
 		element->setDisplayBitmapSource(bitmapVar->getSelfReference());
-	else
+
+		// The element takes the size of the bitmap it starts displaying. Uncle Albert's Fabulous Voyage shrinks the page
+		// it turns by setting the element width, and relies on this to have the page full size on the next turn.
+		const Common::SharedPtr<Graphics::ManagedSurface> &bitmap = bitmapVar->getBitmap();
+		if (bitmap) {
+			const Common::Rect &rect = element->getRelativeRect();
+			if (rect.width() != bitmap->w || rect.height() != bitmap->h)
+				element->setRelativeRect(Common::Rect(rect.left, rect.top, rect.left + bitmap->w, rect.top + bitmap->h));
+		}
+	} else
 		element->setDisplayBitmapSource(Common::WeakPtr<RuntimeObject>());
 }
 
