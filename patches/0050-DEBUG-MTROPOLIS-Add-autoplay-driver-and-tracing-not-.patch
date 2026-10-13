@@ -1,7 +1,7 @@
-From 0101effcf2ca5ef7b8038a08ce72e865bbab2d83 Mon Sep 17 00:00:00 2001
+From 7167539aba119cd09bba13479f23ba82652dd473 Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 16:38:31 -0700
-Subject: [PATCH 49/49] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
+Subject: [PATCH 50/50] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
  for upstream)
 
 Local reverse-engineering tools, not meant to be submitted:
@@ -2676,7 +2676,7 @@ index 558f400119..d4585085d4 100644
  }
  
 diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
-index 0149bea369..0e3944ad9e 100644
+index ddd704094a..0b9771ec9e 100644
 --- a/engines/mtropolis/runtime.cpp
 +++ b/engines/mtropolis/runtime.cpp
 @@ -4125,6 +4125,34 @@ MiniscriptInstructionOutcome Structural::scriptSetLoop(MiniscriptThread *thread,

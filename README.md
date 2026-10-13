@@ -64,6 +64,7 @@ The last patch (`DEBUG:`) is local tooling (autoplay driver, tracing) and is not
 | `0046` | Game hack: keyboard up/down arrows click the name screen arrow buttons (finding a saved player with the keyboard) | Yes |
 | `0047` | `system.mastervolume` reads back the volume set by scripts (the trumpet volume slider) | Yes |
 | `0048` | Hoologic Display Bitmap sizes its element to the bitmap (the new page appeared before the page turn animation) | Yes |
+| `0049` | Thereware Rotator turns counterclockwise like vector motion (the Manila boat pointed the wrong way) | Yes |
 | last, `DEBUG:` | Autoplay driver and tracing | **No**, local tooling only |
 
 The tools, saves, autoplay scripts and notes are in the `oncle-ernest` repository. No game data is included.
