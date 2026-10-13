@@ -63,6 +63,7 @@ The last patch (`DEBUG:`) is local tooling (autoplay driver, tracing) and is not
 | `0045` | SDL 3 web build: duplicated key presses dropped (each letter typed 6 times on the name screen) | Yes |
 | `0046` | Game hack: keyboard up/down arrows click the name screen arrow buttons (finding a saved player with the keyboard) | Yes |
 | `0047` | `system.mastervolume` reads back the volume set by scripts (the trumpet volume slider) | Yes |
+| `0048` | Hoologic Display Bitmap sizes its element to the bitmap (the new page appeared before the page turn animation) | Yes |
 | last, `DEBUG:` | Autoplay driver and tracing | **No**, local tooling only |
 
 The tools, saves, autoplay scripts and notes are in the `oncle-ernest` repository. No game data is included.

@@ -1,0 +1,49 @@
+From 6b2b1270d6f19af2b3d1e41303fec5736156cb77 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Tue, 13 Oct 2026 15:03:04 +0200
+Subject: [PATCH 48/49] MTROPOLIS: Size Hoologic Display Bitmap elements to
+ their bitmap
+
+Displaying a bitmap with the Hoologic Display Bitmap modifier now gives
+the element the size of the bitmap.
+
+Uncle Albert's Fabulous Voyage turns its notebook pages by covering the
+page with a capture of the old page and shrinking that cover toward the
+spine, setting the element width at each step. Nothing else gives the
+cover its full width back, so from the second page turn on the cover
+stayed a 30 pixel sliver: the new page showed at once, before the turn
+animation. The cover is now full size when the turn starts.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/plugin/hoologic.cpp | 13 +++++++++++--
+ 1 file changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/engines/mtropolis/plugin/hoologic.cpp b/engines/mtropolis/plugin/hoologic.cpp
+index 7ed3dd2f27..0ed001cd13 100644
+--- a/engines/mtropolis/plugin/hoologic.cpp
++++ b/engines/mtropolis/plugin/hoologic.cpp
+@@ -399,9 +399,18 @@ void DisplayBitmapModifier::setDisplayed(Runtime *runtime, bool displayed) {
+ 	// The element draws the current contents of the variable, so later changes to the bitmap are displayed too
+ 	VisualElement *element = static_cast<VisualElement *>(owner);
+ 	BitmapVariableModifier *bitmapVar = displayed ? BitmapVariableModifier::resolve(_bitmapVar) : nullptr;
+-	if (bitmapVar)
++	if (bitmapVar) {
+ 		element->setDisplayBitmapSource(bitmapVar->getSelfReference());
+-	else
++
++		// The element takes the size of the bitmap it starts displaying. Uncle Albert's Fabulous Voyage shrinks the page
++		// it turns by setting the element width, and relies on this to have the page full size on the next turn.
++		const Common::SharedPtr<Graphics::ManagedSurface> &bitmap = bitmapVar->getBitmap();
++		if (bitmap) {
++			const Common::Rect &rect = element->getRelativeRect();
++			if (rect.width() != bitmap->w || rect.height() != bitmap->h)
++				element->setRelativeRect(Common::Rect(rect.left, rect.top, rect.left + bitmap->w, rect.top + bitmap->h));
++		}
++	} else
+ 		element->setDisplayBitmapSource(Common::WeakPtr<RuntimeObject>());
+ }
+ 
+-- 
+2.47.3
+
