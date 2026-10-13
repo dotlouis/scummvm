@@ -1692,6 +1692,7 @@ public:
 
 	void setCursorElement(const Common::WeakPtr<VisualElement> &element);
 	void setCursorElementHotspot(const Common::Point &hotspot);
+	void sendKeyClicks(const KeyboardInputEvent &keyEvt);
 	void updateCursorElementPosition();
 
 	void addBoundaryDetector(IBoundaryDetector *boundaryDetector);

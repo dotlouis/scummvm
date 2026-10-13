@@ -4777,6 +4777,8 @@ bool Runtime::runFrame() {
 					}
 
 					_project->onKeyboardEvent(this, *static_cast<KeyboardInputEvent *>(evt.get()));
+
+					sendKeyClicks(*static_cast<KeyboardInputEvent *>(evt.get()));
 				}
 				break;
 			case kOSEventTypeMouseDown:
@@ -6892,6 +6894,47 @@ void Runtime::onMouseUp(int32 x, int32 y, Actions::MouseButton mButton) {
 
 	if (!anyTrue)
 		_mouseFocusWindow.reset();
+}
+
+static Structural *findVisibleElementByName(Structural *structural, const Common::String &name) {
+	if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+		if (!static_cast<VisualElement *>(structural)->isVisible())
+			return nullptr;
+		if (caseInsensitiveEqual(structural->getName(), name))
+			return structural;
+	}
+
+	for (const Common::SharedPtr<Structural> &child : structural->getChildren()) {
+		if (Structural *found = findVisibleElementByName(child.get(), name))
+			return found;
+	}
+
+	return nullptr;
+}
+
+// Clicks the element that a key press clicks, see Hacks::keyClicksElements
+void Runtime::sendKeyClicks(const KeyboardInputEvent &keyEvt) {
+	if (keyEvt.getKeyEventType() != Common::EVENT_KEYDOWN || keyEvt.isRepeat() || !_activeMainScene)
+		return;
+
+	for (const Hacks::KeyClicksElement &keyClick : _hacks.keyClicksElements) {
+		if (keyClick.key != keyEvt.getKeyState().keycode || !caseInsensitiveEqual(_activeMainScene->getName(), keyClick.sceneName))
+			continue;
+
+		Structural *target = findVisibleElementByName(_activeMainScene.get(), keyClick.elementName);
+		if (!target)
+			continue;
+
+		// A whole click: Mouse Down, Mouse Up, Mouse Up Inside (pushed in reverse since VThread tasks run last in first)
+		const EventIDs::EventID clickEvents[] = {EventIDs::kMouseUpInside, EventIDs::kMouseUp, EventIDs::kMouseDown};
+		DynamicValue mousePtValue;
+		mousePtValue.setPoint(_cachedMousePosition);
+		for (EventIDs::EventID eventID : clickEvents) {
+			Common::SharedPtr<MessageProperties> props(new MessageProperties(Event(eventID, 0), mousePtValue, nullptr));
+			Common::SharedPtr<MessageDispatch> dispatch(new MessageDispatch(props, target, false, true, false));
+			sendMessageOnVThread(dispatch);
+		}
+	}
 }
 
 void Runtime::onKeyboardEvent(const Common::EventType evtType, bool repeat, const Common::KeyState &keyEvt) {

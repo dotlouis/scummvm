@@ -25,6 +25,8 @@
 #include "common/rect.h"
 #include "common/ptr.h"
 #include "common/hashmap.h"
+#include "common/keyboard.h"
+#include "common/str.h"
 
 namespace MTropolis {
 
@@ -76,6 +78,16 @@ struct Hacks {
 	// object out of the album margin hides its frame element "cardass" through a reference that the authoring
 	// tool bound to a sound effect modifier also named "cardass", so the frame stayed around the object.
 	bool modifierVisibleWritesGoToSameNamedElement;
+
+	// Pressing a key clicks an element of a scene (Mouse Down, Mouse Up, Mouse Up Inside). Uncle Albert's Fabulous Voyage
+	// tells players to pick their name with the up and down arrows ("flèches haut et bas") on its name screen, but
+	// only its on-screen arrow buttons respond.
+	struct KeyClicksElement {
+		Common::KeyCode key;
+		Common::String sceneName;
+		Common::String elementName;
+	};
+	Common::Array<KeyClicksElement> keyClicksElements;
 
 	uint midiVolumeScale;	// 256 = 1.0
 
