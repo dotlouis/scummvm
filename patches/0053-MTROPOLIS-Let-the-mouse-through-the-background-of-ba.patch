@@ -1,0 +1,112 @@
+From a150e67d54e63f6d80e8b3ea68f0ad5ba7da6c12 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 22:07:22 +0200
+Subject: [PATCH 53/54] MTROPOLIS: Let the mouse through the background of
+ background matte images
+
+Background matte ink makes the background color of an element both
+transparent and non-interactive. mToons only take the mouse where they
+are drawn, but images still took it over their whole rectangle, hiding
+the elements under their background. Uncle Albert's Fabulous Voyage puts
+a turning mirror of the temple over the top of a Ganesh arm: the arm
+could only be picked up by its lower end.
+
+Test the image pixel under the mouse for background matte images, mapped
+back through the rotation and scale they are drawn with.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/elements.cpp | 63 ++++++++++++++++++++++++++++++++++
+ engines/mtropolis/elements.h   |  2 ++
+ 2 files changed, 65 insertions(+)
+
+diff --git a/engines/mtropolis/elements.cpp b/engines/mtropolis/elements.cpp
+index c888a8fdb1..159d0478ac 100644
+--- a/engines/mtropolis/elements.cpp
++++ b/engines/mtropolis/elements.cpp
+@@ -1365,6 +1365,69 @@ void ImageElement::render(Window *window) {
+ 	}
+ }
+ 
++// Background matte images don't take the mouse where their background color shows, like mToons. The point is
++// mapped back through the rotation and scale the image is drawn with.
++bool ImageElement::isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) const {
++	if (_renderProps.getInkMode() != VisualElementRenderProperties::kInkModeBackgroundMatte || !_cachedImage || hasDisplayBitmapSource())
++		return true;
++
++	const Common::SharedPtr<Graphics::ManagedSurface> optimized = _cachedImage->optimize(getRuntime());
++	if (!optimized || optimized->w <= 0 || optimized->h <= 0 || _rect.isEmpty())
++		return true;
++
++	double x = relativeX - _rect.left;
++	double y = relativeY - _rect.top;
++
++	if (hasRotation()) {
++		if (_rotationScaleX <= 0.0 || _rotationScaleY <= 0.0)
++			return false;
++
++		// Undo the counterclockwise rotation around the pivot, then the scale from the top left corner
++		const double pivotX = static_cast<int32>(_rect.width() * _rotationScaleX) / 2 + _rotationAxisOffset.x;
++		const double pivotY = static_cast<int32>(_rect.height() * _rotationScaleY) / 2 + _rotationAxisOffset.y;
++		const double radians = _rotationAngle * M_PI / 180.0;
++		const double dx = x - pivotX;
++		const double dy = y - pivotY;
++		x = (pivotX + dx * cos(radians) - dy * sin(radians)) / _rotationScaleX;
++		y = (pivotY + dx * sin(radians) + dy * cos(radians)) / _rotationScaleY;
++
++		// A rotated image is drawn at its own size, centered in the element
++		x -= (_rect.width() - optimized->w) / 2;
++		y -= (_rect.height() - optimized->h) / 2;
++	} else {
++		x = x * optimized->w / _rect.width();
++		y = y * optimized->h / _rect.height();
++	}
++
++	const int32 pixelX = static_cast<int32>(floor(x));
++	const int32 pixelY = static_cast<int32>(floor(y));
++	if (pixelX < 0 || pixelY < 0 || pixelX >= optimized->w || pixelY >= optimized->h)
++		return false;
++
++	const ColorRGB8 transColorRGB8 = _renderProps.getBackColor();
++	const uint32 pixel = optimized->getPixel(pixelX, pixelY);
++
++	if (optimized->format.bytesPerPixel == 1) {
++		// Paletted images are compared by index, like when they are drawn
++		if (_cachedImage->getOriginalColorDepth() == kColorDepthMode1Bit) {
++			const uint8 bwPalette[2 * 3] = {
++				255, 255, 255,
++				0, 0, 0
++			};
++			return pixel != findPaletteIndex(bwPalette, 2, transColorRGB8);
++		}
++
++		const Palette *palette = getPalette().get();
++		if (!palette)
++			palette = &getRuntime()->getGlobalPalette();
++		return pixel != findPaletteIndex(palette->getPalette(), Palette::kNumColors, transColorRGB8);
++	}
++
++	uint8 a, r, g, b;
++	optimized->format.colorToARGB(pixel, a, r, g, b);
++	return !(r == transColorRGB8.r && g == transColorRGB8.g && b == transColorRGB8.b);
++}
++
+ Common::SharedPtr<Structural> ImageElement::shallowClone() const {
+ 	return Common::SharedPtr<Structural>(new ImageElement(*this));
+ }
+diff --git a/engines/mtropolis/elements.h b/engines/mtropolis/elements.h
+index ed0d80d3ff..f3822be0f6 100644
+--- a/engines/mtropolis/elements.h
++++ b/engines/mtropolis/elements.h
+@@ -206,6 +206,8 @@ public:
+ 
+ 	void render(Window *window) override;
+ 
++	bool isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) const override;
++
+ 	Common::SharedPtr<Structural> shallowClone() const override;
+ 	void visitInternalReferences(IStructuralReferenceVisitor *visitor) override;
+ 
+-- 
+2.47.3
+

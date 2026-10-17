@@ -1,7 +1,7 @@
-From 2d82464bbd3e1c8dbde5e4ac1380db7dc9a5cb13 Mon Sep 17 00:00:00 2001
+From ba934a510ff9211e81d23425b071dc42787215a0 Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 16:38:31 -0700
-Subject: [PATCH 53/53] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
+Subject: [PATCH 54/54] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
  for upstream)
 
 Local reverse-engineering tools, not meant to be submitted:
@@ -2460,11 +2460,11 @@ index 0000000000..a4a96cf56b
 +
 +#endif
 diff --git a/engines/mtropolis/elements.cpp b/engines/mtropolis/elements.cpp
-index c888a8fdb1..b21cdbef9c 100644
+index 159d0478ac..0daf71830b 100644
 --- a/engines/mtropolis/elements.cpp
 +++ b/engines/mtropolis/elements.cpp
-@@ -1365,6 +1365,12 @@ void ImageElement::render(Window *window) {
- 	}
+@@ -1428,6 +1428,12 @@ bool ImageElement::isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) con
+ 	return !(r == transColorRGB8.r && g == transColorRGB8.g && b == transColorRGB8.b);
  }
  
 +Common::SharedPtr<Graphics::ManagedSurface> ImageElement::debugGetImage() {
@@ -2476,7 +2476,7 @@ index c888a8fdb1..b21cdbef9c 100644
  Common::SharedPtr<Structural> ImageElement::shallowClone() const {
  	return Common::SharedPtr<Structural>(new ImageElement(*this));
  }
-@@ -1654,6 +1660,24 @@ void MToonElement::render(Window *window) {
+@@ -1717,6 +1723,24 @@ void MToonElement::render(Window *window) {
  	}
  }
  
@@ -2502,10 +2502,10 @@ index c888a8fdb1..b21cdbef9c 100644
  // the element: Uncle Albert's Fabulous Voyage shrinks the objects put in the album margin this way. Elements authored
  // at another size (the tape recorder, whose size only sets its clickable area) are drawn unscaled.
 diff --git a/engines/mtropolis/elements.h b/engines/mtropolis/elements.h
-index ed0d80d3ff..63161aeffe 100644
+index f3822be0f6..4f32a13385 100644
 --- a/engines/mtropolis/elements.h
 +++ b/engines/mtropolis/elements.h
-@@ -215,6 +215,8 @@ public:
+@@ -217,6 +217,8 @@ public:
  	void debugInspect(IDebugInspectionReport *report) const override;
  #endif
  
@@ -2514,7 +2514,7 @@ index ed0d80d3ff..63161aeffe 100644
  private:
  	MiniscriptInstructionOutcome scriptSetFlushPriority(MiniscriptThread *thread, const DynamicValue &value);
  
-@@ -249,6 +251,10 @@ public:
+@@ -251,6 +253,10 @@ public:
  
  	bool isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) const override;
  
