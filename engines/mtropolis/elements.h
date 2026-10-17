@@ -206,6 +206,8 @@ public:
 
 	void render(Window *window) override;
 
+	bool isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) const override;
+
 	Common::SharedPtr<Structural> shallowClone() const override;
 	void visitInternalReferences(IStructuralReferenceVisitor *visitor) override;
 

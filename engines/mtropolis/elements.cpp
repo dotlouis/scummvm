@@ -1365,6 +1365,69 @@ void ImageElement::render(Window *window) {
 	}
 }
 
+// Background matte images don't take the mouse where their background color shows, like mToons. The point is
+// mapped back through the rotation and scale the image is drawn with.
+bool ImageElement::isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) const {
+	if (_renderProps.getInkMode() != VisualElementRenderProperties::kInkModeBackgroundMatte || !_cachedImage || hasDisplayBitmapSource())
+		return true;
+
+	const Common::SharedPtr<Graphics::ManagedSurface> optimized = _cachedImage->optimize(getRuntime());
+	if (!optimized || optimized->w <= 0 || optimized->h <= 0 || _rect.isEmpty())
+		return true;
+
+	double x = relativeX - _rect.left;
+	double y = relativeY - _rect.top;
+
+	if (hasRotation()) {
+		if (_rotationScaleX <= 0.0 || _rotationScaleY <= 0.0)
+			return false;
+
+		// Undo the counterclockwise rotation around the pivot, then the scale from the top left corner
+		const double pivotX = static_cast<int32>(_rect.width() * _rotationScaleX) / 2 + _rotationAxisOffset.x;
+		const double pivotY = static_cast<int32>(_rect.height() * _rotationScaleY) / 2 + _rotationAxisOffset.y;
+		const double radians = _rotationAngle * M_PI / 180.0;
+		const double dx = x - pivotX;
+		const double dy = y - pivotY;
+		x = (pivotX + dx * cos(radians) - dy * sin(radians)) / _rotationScaleX;
+		y = (pivotY + dx * sin(radians) + dy * cos(radians)) / _rotationScaleY;
+
+		// A rotated image is drawn at its own size, centered in the element
+		x -= (_rect.width() - optimized->w) / 2;
+		y -= (_rect.height() - optimized->h) / 2;
+	} else {
+		x = x * optimized->w / _rect.width();
+		y = y * optimized->h / _rect.height();
+	}
+
+	const int32 pixelX = static_cast<int32>(floor(x));
+	const int32 pixelY = static_cast<int32>(floor(y));
+	if (pixelX < 0 || pixelY < 0 || pixelX >= optimized->w || pixelY >= optimized->h)
+		return false;
+
+	const ColorRGB8 transColorRGB8 = _renderProps.getBackColor();
+	const uint32 pixel = optimized->getPixel(pixelX, pixelY);
+
+	if (optimized->format.bytesPerPixel == 1) {
+		// Paletted images are compared by index, like when they are drawn
+		if (_cachedImage->getOriginalColorDepth() == kColorDepthMode1Bit) {
+			const uint8 bwPalette[2 * 3] = {
+				255, 255, 255,
+				0, 0, 0
+			};
+			return pixel != findPaletteIndex(bwPalette, 2, transColorRGB8);
+		}
+
+		const Palette *palette = getPalette().get();
+		if (!palette)
+			palette = &getRuntime()->getGlobalPalette();
+		return pixel != findPaletteIndex(palette->getPalette(), Palette::kNumColors, transColorRGB8);
+	}
+
+	uint8 a, r, g, b;
+	optimized->format.colorToARGB(pixel, a, r, g, b);
+	return !(r == transColorRGB8.r && g == transColorRGB8.g && b == transColorRGB8.b);
+}
+
 Common::SharedPtr<Structural> ImageElement::shallowClone() const {
 	return Common::SharedPtr<Structural>(new ImageElement(*this));
 }
