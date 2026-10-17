@@ -1,7 +1,7 @@
-From 5cb14d98ac5f7086805b9294fa782815fee7c06c Mon Sep 17 00:00:00 2001
+From 2d82464bbd3e1c8dbde5e4ac1380db7dc9a5cb13 Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 16:38:31 -0700
-Subject: [PATCH 52/52] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
+Subject: [PATCH 53/53] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
  for upstream)
 
 Local reverse-engineering tools, not meant to be submitted:
@@ -2460,10 +2460,10 @@ index 0000000000..a4a96cf56b
 +
 +#endif
 diff --git a/engines/mtropolis/elements.cpp b/engines/mtropolis/elements.cpp
-index 74bc430d18..ac9a1134ec 100644
+index c888a8fdb1..b21cdbef9c 100644
 --- a/engines/mtropolis/elements.cpp
 +++ b/engines/mtropolis/elements.cpp
-@@ -1366,6 +1366,12 @@ void ImageElement::render(Window *window) {
+@@ -1365,6 +1365,12 @@ void ImageElement::render(Window *window) {
  	}
  }
  
@@ -2476,7 +2476,7 @@ index 74bc430d18..ac9a1134ec 100644
  Common::SharedPtr<Structural> ImageElement::shallowClone() const {
  	return Common::SharedPtr<Structural>(new ImageElement(*this));
  }
-@@ -1655,6 +1661,24 @@ void MToonElement::render(Window *window) {
+@@ -1654,6 +1660,24 @@ void MToonElement::render(Window *window) {
  	}
  }
  

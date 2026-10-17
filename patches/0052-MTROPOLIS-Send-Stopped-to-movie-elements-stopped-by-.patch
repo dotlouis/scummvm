@@ -1,0 +1,35 @@
+From 113e11d8c2781a9066b6eba2dfbfc5aea8d3f8c9 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 19:35:21 +0200
+Subject: [PATCH 52/53] MTROPOLIS: Send Stopped to movie elements stopped by a
+ Stop command
+
+The reaction of a movie element to a Stop command should be Paused,
+Hidden, then Stopped, but since the movie command handling became a
+coroutine it sent Paused a second time instead of Stopped. Modifiers
+waiting for the movie to stop never ran. Uncle Albert's Fabulous Voyage
+gives the film reel back from the Hollywood projector when the film
+stops, so a reel put in the projector could not be taken back.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/elements.cpp | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/engines/mtropolis/elements.cpp b/engines/mtropolis/elements.cpp
+index 74bc430d18..c888a8fdb1 100644
+--- a/engines/mtropolis/elements.cpp
++++ b/engines/mtropolis/elements.cpp
+@@ -620,8 +620,7 @@ CORO_BEGIN_DEFINITION(MovieElement::MovieElementConsumeCommandCoroutine)
+ 
+ 			CORO_CALL(ChangeVisibilityCoroutine, params->self, params->runtime, false);
+ 
+-			params->self->_paused = true;
+-			Common::SharedPtr<MessageProperties> msgProps(new MessageProperties(Event(EventIDs::kPause, 0), DynamicValue(), params->self->getSelfReference()));
++			Common::SharedPtr<MessageProperties> msgProps(new MessageProperties(Event(EventIDs::kStop, 0), DynamicValue(), params->self->getSelfReference()));
+ 			Common::SharedPtr<MessageDispatch> dispatch(new MessageDispatch(msgProps, params->self, false, true, false));
+ 
+ 			CORO_CALL(Runtime::SendMessageOnVThreadCoroutine, params->runtime, dispatch);
+-- 
+2.47.3
+

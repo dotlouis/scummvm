@@ -67,6 +67,7 @@ The last patch (`DEBUG:`) is local tooling (autoplay driver, tracing) and is not
 | `0049` | Thereware Rotator turns counterclockwise like vector motion (the Manila boat pointed the wrong way) | Yes |
 | `0050` | Game hack: the LA robot's free roaming starts after its scripted sequence ends (busy cursor stuck after the robot's last line) | Yes |
 | `0051` | Into scene Simple Motion ends at the element's authored position (the planisphere sextant holder only came out the first time) | Yes |
+| `0052` | Movie elements send Stopped after a Stop command (a film reel put in the Hollywood projector could not be taken back) | Yes |
 | last, `DEBUG:` | Autoplay driver and tracing | **No**, local tooling only |
 
 The tools, saves, autoplay scripts and notes are in the `oncle-ernest` repository. No game data is included.
