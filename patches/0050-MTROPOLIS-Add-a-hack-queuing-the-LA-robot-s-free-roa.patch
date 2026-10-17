@@ -1,0 +1,115 @@
+From 9ca0a706ae4e86ae2539f72954232a55e443a7ef Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 18:19:50 +0200
+Subject: [PATCH 50/51] MTROPOLIS: Add a hack queuing the LA robot's free
+ roaming start in Uncle Albert's Fabulous Voyage
+
+When the Los Angeles robot's last line ends, "end_speak_ernesto" clears the
+"ernesto_curs" busy cursor, enables the free roaming behavior, then
+disables the scripted sequence. Enabling free roaming picks a random
+direction at once; when it is within a few degrees of the robot's
+heading, the turn ends immediately and the walk message reaches the
+sequence's "change_cursor_walk" before the sequence is disabled. That
+sets the busy cursor again and nothing clears it: the player is stuck
+with it (about one time in ten).
+
+Add a modifier hook for this game that queues the message starting the
+free roaming, so the sequence script finishes first.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/hacks.cpp     | 21 +++++++++++++++++++++
+ engines/mtropolis/hacks.h       |  2 ++
+ engines/mtropolis/modifiers.cpp |  4 ++++
+ engines/mtropolis/modifiers.h   |  2 ++
+ engines/mtropolis/mtropolis.cpp |  1 +
+ 5 files changed, 30 insertions(+)
+
+diff --git a/engines/mtropolis/hacks.cpp b/engines/mtropolis/hacks.cpp
+index d930fc40ee..f0531b300b 100644
+--- a/engines/mtropolis/hacks.cpp
++++ b/engines/mtropolis/hacks.cpp
+@@ -405,6 +405,27 @@ void ObsidianSaveScreenshotHooks::onSceneTransitionSetup(Runtime *runtime, const
+ 	}
+ }
+ 
++// Uncle Albert's Fabulous Voyage, Los Angeles robot: when its last line ends, "end_speak_ernesto" clears the
++// "ernesto_curs" cursor, enables the free roaming behavior ("manage_move_robot"), then disables the scripted
++// sequence ("manage_robot_la"). Enabling free roaming immediately picks a random direction; when it is within a few
++// degrees of the current one, the turn ends at once and the walk message reaches the sequence's "change_cursor_walk"
++// before it is disabled, which sets the cursor again, for good: the player is left with a busy cursor. Queuing the
++// message that starts free roaming lets the sequence script finish first.
++class Albert2RobotFreeRoamHooks : public ModifierHooks {
++public:
++	void onCreate(Modifier *modifier) override;
++};
++
++void Albert2RobotFreeRoamHooks::onCreate(Modifier *modifier) {
++	if (MessengerModifier *messenger = dynamic_cast<MessengerModifier *>(modifier))
++		messenger->setSendImmediate(false);
++}
++
++void addAlbert2BugFixes(const MTropolisGameDescription &desc, Hacks &hacks) {
++	// "manage_move_robot" messenger: Parent Enabled -> 384/73e (first random direction)
++	hacks.addModifierHooks(0x11c5b8, Common::SharedPtr<ModifierHooks>(new Albert2RobotFreeRoamHooks()));
++}
++
+ void addObsidianQuirks(const MTropolisGameDescription &desc, Hacks &hacks) {
+ 	// Add screenshot hook to store savegame screenshot prior to going to the menu
+ 	hacks.addSceneTransitionHooks(Common::SharedPtr<SceneTransitionHooks>(new ObsidianSaveScreenshotHooks()));
+diff --git a/engines/mtropolis/hacks.h b/engines/mtropolis/hacks.h
+index 5362afec5a..ed2334f113 100644
+--- a/engines/mtropolis/hacks.h
++++ b/engines/mtropolis/hacks.h
+@@ -115,6 +115,8 @@ void addObsidianImprovedWidescreen(const MTropolisGameDescription &desc, Hacks &
+ 
+ void addMTIQuirks(const MTropolisGameDescription &desc, Hacks &hacks);
+ 
++void addAlbert2BugFixes(const MTropolisGameDescription &desc, Hacks &hacks);
++
+ } // End of namespace HackSuites
+ 
+ } // End of namespace MTropolis
+diff --git a/engines/mtropolis/modifiers.cpp b/engines/mtropolis/modifiers.cpp
+index c52d91d961..5af1a66356 100644
+--- a/engines/mtropolis/modifiers.cpp
++++ b/engines/mtropolis/modifiers.cpp
+@@ -577,6 +577,10 @@ void MessengerModifier::visitInternalReferences(IStructuralReferenceVisitor *vis
+ 	_sendSpec.visitInternalReferences(visitor);
+ }
+ 
++void MessengerModifier::setSendImmediate(bool immediate) {
++	_sendSpec.messageFlags.immediate = immediate;
++}
++
+ Common::SharedPtr<Modifier> MessengerModifier::shallowClone() const {
+ 	return Common::SharedPtr<Modifier>(new MessengerModifier(*this));
+ }
+diff --git a/engines/mtropolis/modifiers.h b/engines/mtropolis/modifiers.h
+index 9af1fb9e86..07a76904a7 100644
+--- a/engines/mtropolis/modifiers.h
++++ b/engines/mtropolis/modifiers.h
+@@ -224,6 +224,8 @@ public:
+ 	void linkInternalReferences(ObjectLinkingScope *outerScope) override;
+ 	void visitInternalReferences(IStructuralReferenceVisitor *visitor) override;
+ 
++	void setSendImmediate(bool immediate);
++
+ #ifdef MTROPOLIS_DEBUG_ENABLE
+ 	const char *debugGetTypeName() const override { return "Messenger Modifier"; }
+ 	SupportStatus debugGetSupportStatus() const override { return kSupportStatusDone; }
+diff --git a/engines/mtropolis/mtropolis.cpp b/engines/mtropolis/mtropolis.cpp
+index 72936807f3..fe1838ce3d 100644
+--- a/engines/mtropolis/mtropolis.cpp
++++ b/engines/mtropolis/mtropolis.cpp
+@@ -329,6 +329,7 @@ Common::Error MTropolisEngine::run() {
+ 		_runtime->getHacks().swapRestoredPointLists = true;
+ 		_runtime->getHacks().attribSetVisibleShowsAndHides = true;
+ 		_runtime->getHacks().modifierVisibleWritesGoToSameNamedElement = true;
++		HackSuites::addAlbert2BugFixes(*_gameDescription, _runtime->getHacks());
+ 		_runtime->getHacks().keyClicksElements.push_back(Hacks::KeyClicksElement{Common::KEYCODE_UP, "liste_nom", "bouton_haut"});
+ 		_runtime->getHacks().keyClicksElements.push_back(Hacks::KeyClicksElement{Common::KEYCODE_DOWN, "liste_nom", "bouton_bas"});
+ 	} else if (_gameDescription->gameID == GID_MTI) {
+-- 
+2.47.3
+

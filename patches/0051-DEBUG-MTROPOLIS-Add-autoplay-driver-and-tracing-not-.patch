@@ -1,7 +1,7 @@
-From 7167539aba119cd09bba13479f23ba82652dd473 Mon Sep 17 00:00:00 2001
+From 95025c68bc334990e6a1d79eaefa832cb15c791e Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 16:38:31 -0700
-Subject: [PATCH 50/50] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
+Subject: [PATCH 51/51] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
  for upstream)
 
 Local reverse-engineering tools, not meant to be submitted:
@@ -2539,7 +2539,7 @@ index 7234a8c12f..aaa0332c09 100644
  	// This should be redundant
  	_failed = true;
 diff --git a/engines/mtropolis/modifiers.cpp b/engines/mtropolis/modifiers.cpp
-index c52d91d961..0a541cd609 100644
+index 5af1a66356..03d808030c 100644
 --- a/engines/mtropolis/modifiers.cpp
 +++ b/engines/mtropolis/modifiers.cpp
 @@ -144,6 +144,7 @@ bool BehaviorModifier::load(ModifierLoaderContext &context, const Data::Behavior
@@ -2599,7 +2599,7 @@ index c52d91d961..0a541cd609 100644
  	return true;
  }
  
-@@ -1990,6 +2012,8 @@ bool IfMessengerModifier::load(ModifierLoaderContext &context, const Data::IfMes
+@@ -1994,6 +2016,8 @@ bool IfMessengerModifier::load(ModifierLoaderContext &context, const Data::IfMes
  	if (!MiniscriptParser::parse(data.program, _program, _references))
  		return false;
  
@@ -2608,7 +2608,7 @@ index c52d91d961..0a541cd609 100644
  	return true;
  }
  
-@@ -2076,6 +2100,7 @@ bool TimerMessengerModifier::load(ModifierLoaderContext &context, const Data::Ti
+@@ -2080,6 +2104,7 @@ bool TimerMessengerModifier::load(ModifierLoaderContext &context, const Data::Ti
  	_milliseconds = data.minutes * (60 * 1000) + data.seconds * (1000) + data.hundredthsOfSeconds * 10;
  	_looping = ((data.messageAndTimerFlags & Data::TimerMessengerModifier::kTimerFlagLooping) != 0);
  
@@ -2616,7 +2616,7 @@ index c52d91d961..0a541cd609 100644
  	return true;
  }
  
-@@ -2296,6 +2321,7 @@ bool CollisionDetectionMessengerModifier::load(ModifierLoaderContext &context, c
+@@ -2300,6 +2325,7 @@ bool CollisionDetectionMessengerModifier::load(ModifierLoaderContext &context, c
  		return false;	// Unknown flag combination
  	}
  
@@ -2637,7 +2637,7 @@ index 32bf8ddf1b..1ebac87deb 100644
  	core.o \
  	coroutine_exec.o \
 diff --git a/engines/mtropolis/mtropolis.cpp b/engines/mtropolis/mtropolis.cpp
-index 72936807f3..71a28266c1 100644
+index fe1838ce3d..27a8082eee 100644
 --- a/engines/mtropolis/mtropolis.cpp
 +++ b/engines/mtropolis/mtropolis.cpp
 @@ -43,6 +43,7 @@
@@ -2648,7 +2648,7 @@ index 72936807f3..71a28266c1 100644
  #include "mtropolis/boot.h"
  #include "mtropolis/debug.h"
  #include "mtropolis/runtime.h"
-@@ -340,9 +341,14 @@ Common::Error MTropolisEngine::run() {
+@@ -341,9 +342,14 @@ Common::Error MTropolisEngine::run() {
  	}
  
  
