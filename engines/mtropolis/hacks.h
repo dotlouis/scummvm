@@ -115,6 +115,8 @@ void addObsidianImprovedWidescreen(const MTropolisGameDescription &desc, Hacks &
 
 void addMTIQuirks(const MTropolisGameDescription &desc, Hacks &hacks);
 
+void addAlbert2BugFixes(const MTropolisGameDescription &desc, Hacks &hacks);
+
 } // End of namespace HackSuites
 
 } // End of namespace MTropolis

@@ -577,6 +577,10 @@ void MessengerModifier::visitInternalReferences(IStructuralReferenceVisitor *vis
 	_sendSpec.visitInternalReferences(visitor);
 }
 
+void MessengerModifier::setSendImmediate(bool immediate) {
+	_sendSpec.messageFlags.immediate = immediate;
+}
+
 Common::SharedPtr<Modifier> MessengerModifier::shallowClone() const {
 	return Common::SharedPtr<Modifier>(new MessengerModifier(*this));
 }

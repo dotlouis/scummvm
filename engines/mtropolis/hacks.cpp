@@ -405,6 +405,27 @@ void ObsidianSaveScreenshotHooks::onSceneTransitionSetup(Runtime *runtime, const
 	}
 }
 
+// Uncle Albert's Fabulous Voyage, Los Angeles robot: when its last line ends, "end_speak_ernesto" clears the
+// "ernesto_curs" cursor, enables the free roaming behavior ("manage_move_robot"), then disables the scripted
+// sequence ("manage_robot_la"). Enabling free roaming immediately picks a random direction; when it is within a few
+// degrees of the current one, the turn ends at once and the walk message reaches the sequence's "change_cursor_walk"
+// before it is disabled, which sets the cursor again, for good: the player is left with a busy cursor. Queuing the
+// message that starts free roaming lets the sequence script finish first.
+class Albert2RobotFreeRoamHooks : public ModifierHooks {
+public:
+	void onCreate(Modifier *modifier) override;
+};
+
+void Albert2RobotFreeRoamHooks::onCreate(Modifier *modifier) {
+	if (MessengerModifier *messenger = dynamic_cast<MessengerModifier *>(modifier))
+		messenger->setSendImmediate(false);
+}
+
+void addAlbert2BugFixes(const MTropolisGameDescription &desc, Hacks &hacks) {
+	// "manage_move_robot" messenger: Parent Enabled -> 384/73e (first random direction)
+	hacks.addModifierHooks(0x11c5b8, Common::SharedPtr<ModifierHooks>(new Albert2RobotFreeRoamHooks()));
+}
+
 void addObsidianQuirks(const MTropolisGameDescription &desc, Hacks &hacks) {
 	// Add screenshot hook to store savegame screenshot prior to going to the menu
 	hacks.addSceneTransitionHooks(Common::SharedPtr<SceneTransitionHooks>(new ObsidianSaveScreenshotHooks()));

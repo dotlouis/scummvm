@@ -329,6 +329,7 @@ Common::Error MTropolisEngine::run() {
 		_runtime->getHacks().swapRestoredPointLists = true;
 		_runtime->getHacks().attribSetVisibleShowsAndHides = true;
 		_runtime->getHacks().modifierVisibleWritesGoToSameNamedElement = true;
+		HackSuites::addAlbert2BugFixes(*_gameDescription, _runtime->getHacks());
 		_runtime->getHacks().keyClicksElements.push_back(Hacks::KeyClicksElement{Common::KEYCODE_UP, "liste_nom", "bouton_haut"});
 		_runtime->getHacks().keyClicksElements.push_back(Hacks::KeyClicksElement{Common::KEYCODE_DOWN, "liste_nom", "bouton_bas"});
 	} else if (_gameDescription->gameID == GID_MTI) {

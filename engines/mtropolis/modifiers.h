@@ -224,6 +224,8 @@ public:
 	void linkInternalReferences(ObjectLinkingScope *outerScope) override;
 	void visitInternalReferences(IStructuralReferenceVisitor *visitor) override;
 
+	void setSendImmediate(bool immediate);
+
 #ifdef MTROPOLIS_DEBUG_ENABLE
 	const char *debugGetTypeName() const override { return "Messenger Modifier"; }
 	SupportStatus debugGetSupportStatus() const override { return kSupportStatusDone; }
