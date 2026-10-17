@@ -1,0 +1,124 @@
+From f0b951536c2d34580780847828e42b5bfe1f2f5b Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 19:23:37 +0200
+Subject: [PATCH 51/52] MTROPOLIS: Make into scene simple motion end at the
+ element's authored position
+
+Into scene motion moved the element from outside of the window to where
+it currently is. An element moved out of the scene stays outside of the
+window, so a later into scene motion had nothing to travel and the
+element never came back. Uncle Albert's Fabulous Voyage slides the
+sextant holder of the planisphere out of and into the scene each time
+its button is pressed: it only showed the first time.
+
+Keep the position each visual element is loaded with and end into scene
+motion there.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/modifiers.cpp | 17 +++++++++++++----
+ engines/mtropolis/runtime.cpp   |  7 ++++++-
+ engines/mtropolis/runtime.h     |  2 ++
+ 3 files changed, 21 insertions(+), 5 deletions(-)
+
+diff --git a/engines/mtropolis/modifiers.cpp b/engines/mtropolis/modifiers.cpp
+index 5af1a66356..12b612aea4 100644
+--- a/engines/mtropolis/modifiers.cpp
++++ b/engines/mtropolis/modifiers.cpp
+@@ -1406,7 +1406,9 @@ void SimpleMotionModifier::translateOwner(Runtime *runtime, const Common::Point
+ }
+ 
+ // Out of scene moves the element in the set directions until it is entirely outside of the window. Into scene
+-// moves it the same way, from outside of the window to where it is.
++// moves it the same way, from outside of the window to its authored position: an element moved out of the scene
++// stays there, so a later into scene motion couldn't bring it back to where it currently is. Uncle Albert's
++// Fabulous Voyage slides the sextant holder of the planisphere out of and into the scene this way.
+ void SimpleMotionModifier::startDirectional(Runtime *runtime) {
+ 	Structural *structural = this->findStructuralOwner();
+ 	Window *mainWindow = runtime->getMainWindow().lock().get();
+@@ -1414,12 +1416,19 @@ void SimpleMotionModifier::startDirectional(Runtime *runtime) {
+ 		return;
+ 
+ 	VisualElement *visual = static_cast<VisualElement *>(structural);
+-	const Common::Point pos = visual->getGlobalPosition();
++	const bool into = (_motionType == kMotionTypeIntoScene);
++
++	Common::Point toAuthored(0, 0);
++	if (into) {
++		const Common::Point &authored = visual->getAuthoredPosition();
++		toAuthored = Common::Point(authored.x - visual->getRelativeRect().left, authored.y - visual->getRelativeRect().top);
++	}
++
++	const Common::Point pos = visual->getGlobalPosition() + toAuthored;
+ 	const int32 w = visual->getRelativeRect().width();
+ 	const int32 h = visual->getRelativeRect().height();
+ 	const int32 windowWidth = mainWindow->getWidth();
+ 	const int32 windowHeight = mainWindow->getHeight();
+-	const bool into = (_motionType == kMotionTypeIntoScene);
+ 
+ 	_travel = Common::Point(0, 0);
+ 	if (_directionFlags & kDirectionFlagDown)
+@@ -1437,7 +1446,7 @@ void SimpleMotionModifier::startDirectional(Runtime *runtime) {
+ 
+ 	// Into scene starts outside of the window
+ 	if (into)
+-		translateOwner(runtime, Common::Point(-_travel.x, -_travel.y));
++		translateOwner(runtime, Common::Point(toAuthored.x - _travel.x, toAuthored.y - _travel.y));
+ 
+ 	_scheduledEvent = runtime->getScheduler().scheduleMethod<SimpleMotionModifier, &SimpleMotionModifier::runDirectional>(_lastTickTime + 1, this);
+ }
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index ddd704094a..20d9c4e4e1 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -9429,7 +9429,7 @@ VisualElement::VisualElement()
+ 
+ VisualElement::VisualElement(const VisualElement &other)
+ 	: Element(other), _directToScreen(other._directToScreen), _visible(other._visible), _visibilityChangedByScript(other._visibilityChangedByScript), _visibleByDefault(other._visibleByDefault)
+-	, _rect(other._rect), _cachedAbsoluteOrigin(other._cachedAbsoluteOrigin), _layer(other._layer), _topLeftBevelShading(other._topLeftBevelShading)
++	, _rect(other._rect), _authoredPosition(other._authoredPosition), _cachedAbsoluteOrigin(other._cachedAbsoluteOrigin), _layer(other._layer), _topLeftBevelShading(other._topLeftBevelShading)
+ 	, _bottomRightBevelShading(other._bottomRightBevelShading), _interiorShading(other._interiorShading), _bevelSize(other._bevelSize)
+ 	, _dragProps(nullptr), _renderProps(other._renderProps), _primaryGraphicModifier(nullptr), _transitionProps(other._transitionProps)
+ 	, _palette(other._palette), _prevRect(other._prevRect), _contentsDirty(true)
+@@ -9775,6 +9775,10 @@ const Common::Rect &VisualElement::getRelativeRect() const {
+ 	return _rect;
+ }
+ 
++const Common::Point &VisualElement::getAuthoredPosition() const {
++	return _authoredPosition;
++}
++
+ Common::Rect VisualElement::getRelativeCollisionRect() const {
+ 	return getRelativeRect();
+ }
+@@ -10153,6 +10157,7 @@ bool VisualElement::loadCommon(const Common::String &name, uint32 guid, const Da
+ 	if (!rect.toScummVMRect(_rect))
+ 		return false;
+ 
++	_authoredPosition = Common::Point(_rect.left, _rect.top);
+ 	_name = name;
+ 	_guid = guid;
+ 	_visibleByDefault = ((elementFlags & Data::ElementFlags::kHidden) == 0);	// Element isn't actually flagged as visible until after Scene Changed, when Show commands are fired
+diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
+index b9bd204a7f..24e64bf5c3 100644
+--- a/engines/mtropolis/runtime.h
++++ b/engines/mtropolis/runtime.h
+@@ -2885,6 +2885,7 @@ public:
+ 	Common::Point getParentOrigin() const;
+ 	Common::Point getGlobalPosition() const;
+ 	const Common::Rect &getRelativeRect() const;
++	const Common::Point &getAuthoredPosition() const;
+ 	virtual Common::Rect getRelativeCollisionRect() const;
+ 
+ 	void setRelativeRect(const Common::Rect &rect);
+@@ -3019,6 +3020,7 @@ protected:
+ 	bool _visibilityChangedByScript;	// Shown or hidden by a script since the scene started: default visibility leaves it
+ 	bool _visibleByDefault;
+ 	Common::Rect _rect;
++	Common::Point _authoredPosition;	// Position relative to the parent as loaded from the project
+ 	Common::Point _cachedAbsoluteOrigin;
+ 	uint16 _layer;
+ 
+-- 
+2.47.3
+

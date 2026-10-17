@@ -66,6 +66,7 @@ The last patch (`DEBUG:`) is local tooling (autoplay driver, tracing) and is not
 | `0048` | Hoologic Display Bitmap sizes its element to the bitmap (the new page appeared before the page turn animation) | Yes |
 | `0049` | Thereware Rotator turns counterclockwise like vector motion (the Manila boat pointed the wrong way) | Yes |
 | `0050` | Game hack: the LA robot's free roaming starts after its scripted sequence ends (busy cursor stuck after the robot's last line) | Yes |
+| `0051` | Into scene Simple Motion ends at the element's authored position (the planisphere sextant holder only came out the first time) | Yes |
 | last, `DEBUG:` | Autoplay driver and tracing | **No**, local tooling only |
 
 The tools, saves, autoplay scripts and notes are in the `oncle-ernest` repository. No game data is included.
