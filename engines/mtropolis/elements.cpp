@@ -620,8 +620,7 @@ CORO_BEGIN_DEFINITION(MovieElement::MovieElementConsumeCommandCoroutine)
 
 			CORO_CALL(ChangeVisibilityCoroutine, params->self, params->runtime, false);
 
-			params->self->_paused = true;
-			Common::SharedPtr<MessageProperties> msgProps(new MessageProperties(Event(EventIDs::kPause, 0), DynamicValue(), params->self->getSelfReference()));
+			Common::SharedPtr<MessageProperties> msgProps(new MessageProperties(Event(EventIDs::kStop, 0), DynamicValue(), params->self->getSelfReference()));
 			Common::SharedPtr<MessageDispatch> dispatch(new MessageDispatch(msgProps, params->self, false, true, false));
 
 			CORO_CALL(Runtime::SendMessageOnVThreadCoroutine, params->runtime, dispatch);
