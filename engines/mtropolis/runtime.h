@@ -2885,6 +2885,7 @@ public:
 	Common::Point getParentOrigin() const;
 	Common::Point getGlobalPosition() const;
 	const Common::Rect &getRelativeRect() const;
+	const Common::Point &getAuthoredPosition() const;
 	virtual Common::Rect getRelativeCollisionRect() const;
 
 	void setRelativeRect(const Common::Rect &rect);
@@ -3019,6 +3020,7 @@ protected:
 	bool _visibilityChangedByScript;	// Shown or hidden by a script since the scene started: default visibility leaves it
 	bool _visibleByDefault;
 	Common::Rect _rect;
+	Common::Point _authoredPosition;	// Position relative to the parent as loaded from the project
 	Common::Point _cachedAbsoluteOrigin;
 	uint16 _layer;
 

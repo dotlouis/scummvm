@@ -1406,7 +1406,9 @@ void SimpleMotionModifier::translateOwner(Runtime *runtime, const Common::Point 
 }
 
 // Out of scene moves the element in the set directions until it is entirely outside of the window. Into scene
-// moves it the same way, from outside of the window to where it is.
+// moves it the same way, from outside of the window to its authored position: an element moved out of the scene
+// stays there, so a later into scene motion couldn't bring it back to where it currently is. Uncle Albert's
+// Fabulous Voyage slides the sextant holder of the planisphere out of and into the scene this way.
 void SimpleMotionModifier::startDirectional(Runtime *runtime) {
 	Structural *structural = this->findStructuralOwner();
 	Window *mainWindow = runtime->getMainWindow().lock().get();
@@ -1414,12 +1416,19 @@ void SimpleMotionModifier::startDirectional(Runtime *runtime) {
 		return;
 
 	VisualElement *visual = static_cast<VisualElement *>(structural);
-	const Common::Point pos = visual->getGlobalPosition();
+	const bool into = (_motionType == kMotionTypeIntoScene);
+
+	Common::Point toAuthored(0, 0);
+	if (into) {
+		const Common::Point &authored = visual->getAuthoredPosition();
+		toAuthored = Common::Point(authored.x - visual->getRelativeRect().left, authored.y - visual->getRelativeRect().top);
+	}
+
+	const Common::Point pos = visual->getGlobalPosition() + toAuthored;
 	const int32 w = visual->getRelativeRect().width();
 	const int32 h = visual->getRelativeRect().height();
 	const int32 windowWidth = mainWindow->getWidth();
 	const int32 windowHeight = mainWindow->getHeight();
-	const bool into = (_motionType == kMotionTypeIntoScene);
 
 	_travel = Common::Point(0, 0);
 	if (_directionFlags & kDirectionFlagDown)
@@ -1437,7 +1446,7 @@ void SimpleMotionModifier::startDirectional(Runtime *runtime) {
 
 	// Into scene starts outside of the window
 	if (into)
-		translateOwner(runtime, Common::Point(-_travel.x, -_travel.y));
+		translateOwner(runtime, Common::Point(toAuthored.x - _travel.x, toAuthored.y - _travel.y));
 
 	_scheduledEvent = runtime->getScheduler().scheduleMethod<SimpleMotionModifier, &SimpleMotionModifier::runDirectional>(_lastTickTime + 1, this);
 }

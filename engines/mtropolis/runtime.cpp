@@ -9429,7 +9429,7 @@ VisualElement::VisualElement()
 
 VisualElement::VisualElement(const VisualElement &other)
 	: Element(other), _directToScreen(other._directToScreen), _visible(other._visible), _visibilityChangedByScript(other._visibilityChangedByScript), _visibleByDefault(other._visibleByDefault)
-	, _rect(other._rect), _cachedAbsoluteOrigin(other._cachedAbsoluteOrigin), _layer(other._layer), _topLeftBevelShading(other._topLeftBevelShading)
+	, _rect(other._rect), _authoredPosition(other._authoredPosition), _cachedAbsoluteOrigin(other._cachedAbsoluteOrigin), _layer(other._layer), _topLeftBevelShading(other._topLeftBevelShading)
 	, _bottomRightBevelShading(other._bottomRightBevelShading), _interiorShading(other._interiorShading), _bevelSize(other._bevelSize)
 	, _dragProps(nullptr), _renderProps(other._renderProps), _primaryGraphicModifier(nullptr), _transitionProps(other._transitionProps)
 	, _palette(other._palette), _prevRect(other._prevRect), _contentsDirty(true)
@@ -9773,6 +9773,10 @@ MiniscriptInstructionOutcome VisualElement::writeRefAttribute(MiniscriptThread *
 
 const Common::Rect &VisualElement::getRelativeRect() const {
 	return _rect;
+}
+
+const Common::Point &VisualElement::getAuthoredPosition() const {
+	return _authoredPosition;
 }
 
 Common::Rect VisualElement::getRelativeCollisionRect() const {
@@ -10153,6 +10157,7 @@ bool VisualElement::loadCommon(const Common::String &name, uint32 guid, const Da
 	if (!rect.toScummVMRect(_rect))
 		return false;
 
+	_authoredPosition = Common::Point(_rect.left, _rect.top);
 	_name = name;
 	_guid = guid;
 	_visibleByDefault = ((elementFlags & Data::ElementFlags::kHidden) == 0);	// Element isn't actually flagged as visible until after Scene Changed, when Show commands are fired
