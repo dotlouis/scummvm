@@ -2864,6 +2864,7 @@ public:
 
 	bool isVisible() const;
 	bool isVisibleByDefault() const;
+	bool isHiddenByAuthor() const;
 	bool isVisibilityChangedByScript() const { return _visibilityChangedByScript; }
 	void clearVisibilityChangedByScript() { _visibilityChangedByScript = false; }
 	void setVisible(Runtime *runtime, bool visible);
@@ -3019,6 +3020,7 @@ protected:
 	bool _visible;
 	bool _visibilityChangedByScript;	// Shown or hidden by a script since the scene started: default visibility leaves it
 	bool _visibleByDefault;
+	bool _hiddenByAuthor;	// Flagged hidden in the project, unlike _visibleByDefault scripts don't change it
 	Common::Rect _rect;
 	Common::Point _authoredPosition;	// Position relative to the parent as loaded from the project
 	Common::Point _cachedAbsoluteOrigin;

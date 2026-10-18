@@ -5392,6 +5392,17 @@ void Runtime::executeSceneChangeRecursiveVisibilityChange(Structural *structural
 	}
 }
 
+static void recursiveHideHiddenByAuthor(Runtime *runtime, Structural *structural) {
+	if (structural->isElement() && static_cast<Element *>(structural)->isVisual()) {
+		VisualElement *visual = static_cast<VisualElement *>(structural);
+		if (visual->isHiddenByAuthor())
+			visual->setVisible(runtime, false);
+	}
+
+	for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+		recursiveHideHiddenByAuthor(runtime, child.get());
+}
+
 void Runtime::executeChangeObjectParent(RuntimeObject *object, RuntimeObject *newParent) {
 	// TODO: Should do circularity checks
 
@@ -5447,9 +5458,19 @@ void Runtime::executeChangeObjectParent(RuntimeObject *object, RuntimeObject *ne
 		}
 
 		Structural *newParentStructural = static_cast<Structural *>(newParent);
+		Structural *oldScene = structural->findScene();
 
 		oldParent->removeChild(structural.get());
 		newParentStructural->addChild(structural);
+
+		// The children of an element moved to another scene that are flagged hidden in the project are hidden
+		// again, and scripts show what they need. Uncle Albert's Fabulous Voyage relies on this to hide the frame
+		// and caption of a photo moved to the sides of the album, and shows them again when the photo goes back
+		// on a page.
+		if (structural->isElement() && structural->findScene() != oldScene) {
+			for (const Common::SharedPtr<Structural> &child : structural->getChildren())
+				recursiveHideHiddenByAuthor(this, child.get());
+		}
 
 		{
 			Common::SharedPtr<MessageProperties> msgProps(new MessageProperties(Event(EventIDs::kParentChanged, 0), DynamicValue(), structural->getSelfReference()));
@@ -9422,13 +9443,13 @@ VisualElementRenderProperties &VisualElementRenderProperties::operator=(const Vi
 }
 
 VisualElement::VisualElement()
-	: _rect(0, 0, 0, 0), _cachedAbsoluteOrigin(Common::Point(0, 0)), _contentsDirty(true), _directToScreen(false), _visible(false), _visibilityChangedByScript(false), _visibleByDefault(true), _layer(0),
+	: _rect(0, 0, 0, 0), _cachedAbsoluteOrigin(Common::Point(0, 0)), _contentsDirty(true), _directToScreen(false), _visible(false), _visibilityChangedByScript(false), _visibleByDefault(true), _hiddenByAuthor(false), _layer(0),
 	  _topLeftBevelShading(0), _bottomRightBevelShading(0), _interiorShading(0), _bevelSize(0),
 	  _hasRotation(false), _rotationAngle(0.0), _rotationScaleX(1.0), _rotationScaleY(1.0), _rotationCacheKey(0), _rotationCacheAngle(0.0), _rotationCacheScaleX(1.0), _rotationCacheScaleY(1.0), _rotationCacheSource(nullptr), _rotationCacheTransColor(0) {
 }
 
 VisualElement::VisualElement(const VisualElement &other)
-	: Element(other), _directToScreen(other._directToScreen), _visible(other._visible), _visibilityChangedByScript(other._visibilityChangedByScript), _visibleByDefault(other._visibleByDefault)
+	: Element(other), _directToScreen(other._directToScreen), _visible(other._visible), _visibilityChangedByScript(other._visibilityChangedByScript), _visibleByDefault(other._visibleByDefault), _hiddenByAuthor(other._hiddenByAuthor)
 	, _rect(other._rect), _authoredPosition(other._authoredPosition), _cachedAbsoluteOrigin(other._cachedAbsoluteOrigin), _layer(other._layer), _topLeftBevelShading(other._topLeftBevelShading)
 	, _bottomRightBevelShading(other._bottomRightBevelShading), _interiorShading(other._interiorShading), _bevelSize(other._bevelSize)
 	, _dragProps(nullptr), _renderProps(other._renderProps), _primaryGraphicModifier(nullptr), _transitionProps(other._transitionProps)
@@ -9450,6 +9471,10 @@ bool VisualElement::isVisible() const {
 
 bool VisualElement::isVisibleByDefault() const {
 	return _visibleByDefault;
+}
+
+bool VisualElement::isHiddenByAuthor() const {
+	return _hiddenByAuthor;
 }
 
 void VisualElement::setVisible(Runtime *runtime, bool visible) {
@@ -10161,6 +10186,7 @@ bool VisualElement::loadCommon(const Common::String &name, uint32 guid, const Da
 	_name = name;
 	_guid = guid;
 	_visibleByDefault = ((elementFlags & Data::ElementFlags::kHidden) == 0);	// Element isn't actually flagged as visible until after Scene Changed, when Show commands are fired
+	_hiddenByAuthor = ((elementFlags & Data::ElementFlags::kHidden) != 0);
 	_directToScreen = ((elementFlags & Data::ElementFlags::kNotDirectToScreen) == 0);
 	_streamLocator = streamLocator;
 	_sectionID = sectionID;
