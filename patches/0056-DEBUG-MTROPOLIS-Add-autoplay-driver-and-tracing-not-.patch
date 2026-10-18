@@ -1,7 +1,7 @@
-From 352809f2fba08148dfe58c8643c4705092d3e8e6 Mon Sep 17 00:00:00 2001
+From a5492af07d31a6a531ef225cfb7cc9efe1e61afb Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 16:38:31 -0700
-Subject: [PATCH 55/55] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
+Subject: [PATCH 56/56] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
  for upstream)
 
 Local reverse-engineering tools, not meant to be submitted:
@@ -2460,10 +2460,10 @@ index 0000000000..a4a96cf56b
 +
 +#endif
 diff --git a/engines/mtropolis/elements.cpp b/engines/mtropolis/elements.cpp
-index 159d0478ac..0daf71830b 100644
+index a4200b315d..76308d3ceb 100644
 --- a/engines/mtropolis/elements.cpp
 +++ b/engines/mtropolis/elements.cpp
-@@ -1428,6 +1428,12 @@ bool ImageElement::isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) con
+@@ -1426,6 +1426,12 @@ bool ImageElement::isMouseCollisionAtPoint(int32 relativeX, int32 relativeY) con
  	return !(r == transColorRGB8.r && g == transColorRGB8.g && b == transColorRGB8.b);
  }
  
@@ -2476,7 +2476,7 @@ index 159d0478ac..0daf71830b 100644
  Common::SharedPtr<Structural> ImageElement::shallowClone() const {
  	return Common::SharedPtr<Structural>(new ImageElement(*this));
  }
-@@ -1717,6 +1723,24 @@ void MToonElement::render(Window *window) {
+@@ -1725,6 +1731,24 @@ void MToonElement::render(Window *window) {
  	}
  }
  
@@ -2676,7 +2676,7 @@ index 558f400119..d4585085d4 100644
  }
  
 diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
-index b654e6c3f1..bde7314e88 100644
+index f4c72f6e59..b982c9d811 100644
 --- a/engines/mtropolis/runtime.cpp
 +++ b/engines/mtropolis/runtime.cpp
 @@ -4125,6 +4125,34 @@ MiniscriptInstructionOutcome Structural::scriptSetLoop(MiniscriptThread *thread,
@@ -2876,7 +2876,7 @@ index b654e6c3f1..bde7314e88 100644
  			_mouseTrackingObject = tracked->getSelfReference().staticCast<Structural>();
  			_mouseTrackingDragStart = _cachedMousePosition;
 diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
-index e746f54562..b81370de35 100644
+index 8ccd9cbde3..21a88fa719 100644
 --- a/engines/mtropolis/runtime.h
 +++ b/engines/mtropolis/runtime.h
 @@ -1731,6 +1731,9 @@ public:

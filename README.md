@@ -70,6 +70,7 @@ The last patch (`DEBUG:`) is local tooling (autoplay driver, tracing) and is not
 | `0052` | Movie elements send Stopped after a Stop command (a film reel put in the Hollywood projector could not be taken back) | Yes |
 | `0053` | Background matte images let the mouse through their background (a Ganesh arm under a temple mirror could not be picked up) | Yes |
 | `0054` | Elements moved to another scene hide their children flagged hidden (a photo put on the sides of the album became a large white card) | Yes |
+| `0055` | Fade transitions drawn for copy ink images and mToons (the LA timetable names and digits popped in instead of fading) | Yes |
 | last, `DEBUG:` | Autoplay driver and tracing | **No**, local tooling only |
 
 The tools, saves, autoplay scripts and notes are in the `oncle-ernest` repository. No game data is included.

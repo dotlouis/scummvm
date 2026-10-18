@@ -1,0 +1,151 @@
+From 747c9eaf5aecea4be43aac5a86fae6febbd9fd32 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 10:35:07 +0200
+Subject: [PATCH 55/56] MTROPOLIS: Draw fade transitions of copy ink images and
+ mToons
+
+Element transition fades set the alpha of their element, but only
+background transparent images were drawn with it: copy ink images
+warned and dropped the fade, and mToons ignored it. Uncle Albert's
+Fabulous Voyage fades in the town names and clock digits of the Los
+Angeles timetable, which popped in at once instead.
+
+Draw these elements blended with the transition alpha while it is
+below full opacity.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/elements.cpp | 28 ++++++++++++-------
+ engines/mtropolis/runtime.cpp  | 49 ++++++++++++++++++++++++++++++++++
+ engines/mtropolis/runtime.h    |  1 +
+ 3 files changed, 68 insertions(+), 10 deletions(-)
+
+diff --git a/engines/mtropolis/elements.cpp b/engines/mtropolis/elements.cpp
+index 159d0478ac..a4200b315d 100644
+--- a/engines/mtropolis/elements.cpp
++++ b/engines/mtropolis/elements.cpp
+@@ -1353,12 +1353,10 @@ void ImageElement::render(Window *window) {
+ 			if (renderRotated(window, *optimized, srcRect, destOrigin, false, 0, paletteData, 0))
+ 				return;
+ 
+-			if (alpha != 255) {
+-				warning("Alpha fade was applied to a default or copy image, this isn't supported yet");
+-				_transitionProps.setAlpha(255);
+-			}
+-
+-			window->getSurface()->blitFrom(*optimized, srcRect, destRect);
++			if (alpha != 255)
++				renderFaded(window, *optimized, srcRect, destRect, false, 0, paletteData, alpha);
++			else
++				window->getSurface()->blitFrom(*optimized, srcRect, destRect);
+ 		} else {
+ 			warning("Unimplemented image ink mode");
+ 		}
+@@ -1653,6 +1651,8 @@ void MToonElement::render(Window *window) {
+ 
+ 		_renderedFrame = frame;
+ 
++		const uint8 alpha = _transitionProps.getAlpha();
++
+ 		// This is a bit suboptimal since we don't need to render the frame if invisible, but
+ 		// we do need some things here to be up to date because isMouseCollisionAtPoint depends on
+ 		// invisible mToon frames still being clickable.
+@@ -1705,11 +1705,19 @@ void MToonElement::render(Window *window) {
+ 				} else
+ 					transColor = _renderSurface->format.ARGBToColor(255, transColorRGB8.r, transColorRGB8.g, transColorRGB8.b);
+ 
+-				if (!renderFrameTransformed(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), true, transColor, palette ? palette->getPalette() : nullptr, frame + 1))
+-					window->getSurface()->transBlitFrom(*_renderSurface, srcRect, destRect, transColor);
++				if (!renderFrameTransformed(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), true, transColor, palette ? palette->getPalette() : nullptr, frame + 1)) {
++					if (alpha != 255)
++						renderFaded(window, *_renderSurface, srcRect, destRect, true, transColor, palette ? palette->getPalette() : nullptr, alpha);
++					else
++						window->getSurface()->transBlitFrom(*_renderSurface, srcRect, destRect, transColor);
++				}
+ 			} else if (inkMode == VisualElementRenderProperties::kInkModeCopy || inkMode == VisualElementRenderProperties::kInkModeDefault) {
+-				if (!renderFrameTransformed(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), false, 0, palette ? palette->getPalette() : nullptr, frame + 1))
+-					window->getSurface()->blitFrom(*_renderSurface, srcRect, destRect);
++				if (!renderFrameTransformed(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), false, 0, palette ? palette->getPalette() : nullptr, frame + 1)) {
++					if (alpha != 255)
++						renderFaded(window, *_renderSurface, srcRect, destRect, false, 0, palette ? palette->getPalette() : nullptr, alpha);
++					else
++						window->getSurface()->blitFrom(*_renderSurface, srcRect, destRect);
++				}
+ 			} else {
+ 				warning("Unsupported mToon ink mode");
+ 			}
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index b654e6c3f1..f4c72f6e59 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -9960,6 +9960,55 @@ bool VisualElement::hasRotation() const {
+ 	return _hasRotation;
+ }
+ 
++// Draws the contents blended over the window with a constant alpha, for fade transitions. The source is scaled to
++// the destination like blitFrom does, and the transparent color, if any, is skipped.
++void VisualElement::renderFaded(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Rect &destRect, bool hasTransColor, uint32 transColor, const byte *palette, uint8 alpha) {
++	Graphics::ManagedSurface *dest = window->getSurface().get();
++	const Common::Rect clipped = destRect.findIntersectingRect(Common::Rect(dest->w, dest->h));
++	if (alpha == 0 || clipped.isEmpty() || srcRect.isEmpty())
++		return;
++
++	// The transparent color of a high color source is compared without its alpha, which images leave at 0
++	uint32 rgbMask = 0xffffffff;
++	if (src.format.bytesPerPixel != 1 && src.format.aBits() > 0)
++		rgbMask = ~(((1u << src.format.aBits()) - 1) << src.format.aShift);
++
++	for (int y = clipped.top; y < clipped.bottom; y++) {
++		const int srcY = srcRect.top + (y - destRect.top) * srcRect.height() / destRect.height();
++		for (int x = clipped.left; x < clipped.right; x++) {
++			const int srcX = srcRect.left + (x - destRect.left) * srcRect.width() / destRect.width();
++			const uint32 raw = src.getPixel(srcX, srcY);
++			if (hasTransColor && (raw & rgbMask) == (transColor & rgbMask))
++				continue;
++
++			if (dest->format.bytesPerPixel == 1) {
++				// No blending on a paletted screen
++				dest->setPixel(x, y, raw);
++				continue;
++			}
++
++			uint8 r, g, b;
++			if (src.format.bytesPerPixel == 1) {
++				r = palette[raw * 3 + 0];
++				g = palette[raw * 3 + 1];
++				b = palette[raw * 3 + 2];
++			} else {
++				uint8 a;
++				src.format.colorToARGB(raw, a, r, g, b);
++			}
++
++			uint8 destA, destR, destG, destB;
++			dest->format.colorToARGB(dest->getPixel(x, y), destA, destR, destG, destB);
++			r = (r * alpha + destR * (255 - alpha)) / 255;
++			g = (g * alpha + destG * (255 - alpha)) / 255;
++			b = (b * alpha + destB * (255 - alpha)) / 255;
++			dest->setPixel(x, y, dest->format.ARGBToColor(255, r, g, b));
++		}
++	}
++
++	dest->addDirtyRect(clipped);
++}
++
+ bool VisualElement::renderRotated(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey) {
+ 	return renderTransformed(window, src, srcRect, destOrigin, hasTransColor, transColor, palette, cacheKey, _rotationAngle, _rotationAxisOffset, _rotationScaleX, _rotationScaleY);
+ }
+diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
+index e746f54562..8ccd9cbde3 100644
+--- a/engines/mtropolis/runtime.h
++++ b/engines/mtropolis/runtime.h
+@@ -2954,6 +2954,7 @@ protected:
+ 	// destOrigin is where the top-left of srcRect goes without rotation. Pixels equal to transColor are
+ 	// transparent if hasTransColor. palette is used for 8-bit sources. cacheKey identifies the source contents.
+ 	bool renderRotated(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey);
++	void renderFaded(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Rect &destRect, bool hasTransColor, uint32 transColor, const byte *palette, uint8 alpha);
+ 	bool renderTransformed(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey, double angleDegrees, const Common::Point &axisOffset, double scaleX, double scaleY);
+ 
+ 	// Write proxy for "asset", which only accepts the "preload" hint
+-- 
+2.47.3
+
