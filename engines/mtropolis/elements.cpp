@@ -1353,12 +1353,10 @@ void ImageElement::render(Window *window) {
 			if (renderRotated(window, *optimized, srcRect, destOrigin, false, 0, paletteData, 0))
 				return;
 
-			if (alpha != 255) {
-				warning("Alpha fade was applied to a default or copy image, this isn't supported yet");
-				_transitionProps.setAlpha(255);
-			}
-
-			window->getSurface()->blitFrom(*optimized, srcRect, destRect);
+			if (alpha != 255)
+				renderFaded(window, *optimized, srcRect, destRect, false, 0, paletteData, alpha);
+			else
+				window->getSurface()->blitFrom(*optimized, srcRect, destRect);
 		} else {
 			warning("Unimplemented image ink mode");
 		}
@@ -1653,6 +1651,8 @@ void MToonElement::render(Window *window) {
 
 		_renderedFrame = frame;
 
+		const uint8 alpha = _transitionProps.getAlpha();
+
 		// This is a bit suboptimal since we don't need to render the frame if invisible, but
 		// we do need some things here to be up to date because isMouseCollisionAtPoint depends on
 		// invisible mToon frames still being clickable.
@@ -1705,11 +1705,19 @@ void MToonElement::render(Window *window) {
 				} else
 					transColor = _renderSurface->format.ARGBToColor(255, transColorRGB8.r, transColorRGB8.g, transColorRGB8.b);
 
-				if (!renderFrameTransformed(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), true, transColor, palette ? palette->getPalette() : nullptr, frame + 1))
-					window->getSurface()->transBlitFrom(*_renderSurface, srcRect, destRect, transColor);
+				if (!renderFrameTransformed(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), true, transColor, palette ? palette->getPalette() : nullptr, frame + 1)) {
+					if (alpha != 255)
+						renderFaded(window, *_renderSurface, srcRect, destRect, true, transColor, palette ? palette->getPalette() : nullptr, alpha);
+					else
+						window->getSurface()->transBlitFrom(*_renderSurface, srcRect, destRect, transColor);
+				}
 			} else if (inkMode == VisualElementRenderProperties::kInkModeCopy || inkMode == VisualElementRenderProperties::kInkModeDefault) {
-				if (!renderFrameTransformed(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), false, 0, palette ? palette->getPalette() : nullptr, frame + 1))
-					window->getSurface()->blitFrom(*_renderSurface, srcRect, destRect);
+				if (!renderFrameTransformed(window, *_renderSurface, srcRect, Common::Point(destRect.left, destRect.top), false, 0, palette ? palette->getPalette() : nullptr, frame + 1)) {
+					if (alpha != 255)
+						renderFaded(window, *_renderSurface, srcRect, destRect, false, 0, palette ? palette->getPalette() : nullptr, alpha);
+					else
+						window->getSurface()->blitFrom(*_renderSurface, srcRect, destRect);
+				}
 			} else {
 				warning("Unsupported mToon ink mode");
 			}

@@ -9960,6 +9960,55 @@ bool VisualElement::hasRotation() const {
 	return _hasRotation;
 }
 
+// Draws the contents blended over the window with a constant alpha, for fade transitions. The source is scaled to
+// the destination like blitFrom does, and the transparent color, if any, is skipped.
+void VisualElement::renderFaded(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Rect &destRect, bool hasTransColor, uint32 transColor, const byte *palette, uint8 alpha) {
+	Graphics::ManagedSurface *dest = window->getSurface().get();
+	const Common::Rect clipped = destRect.findIntersectingRect(Common::Rect(dest->w, dest->h));
+	if (alpha == 0 || clipped.isEmpty() || srcRect.isEmpty())
+		return;
+
+	// The transparent color of a high color source is compared without its alpha, which images leave at 0
+	uint32 rgbMask = 0xffffffff;
+	if (src.format.bytesPerPixel != 1 && src.format.aBits() > 0)
+		rgbMask = ~(((1u << src.format.aBits()) - 1) << src.format.aShift);
+
+	for (int y = clipped.top; y < clipped.bottom; y++) {
+		const int srcY = srcRect.top + (y - destRect.top) * srcRect.height() / destRect.height();
+		for (int x = clipped.left; x < clipped.right; x++) {
+			const int srcX = srcRect.left + (x - destRect.left) * srcRect.width() / destRect.width();
+			const uint32 raw = src.getPixel(srcX, srcY);
+			if (hasTransColor && (raw & rgbMask) == (transColor & rgbMask))
+				continue;
+
+			if (dest->format.bytesPerPixel == 1) {
+				// No blending on a paletted screen
+				dest->setPixel(x, y, raw);
+				continue;
+			}
+
+			uint8 r, g, b;
+			if (src.format.bytesPerPixel == 1) {
+				r = palette[raw * 3 + 0];
+				g = palette[raw * 3 + 1];
+				b = palette[raw * 3 + 2];
+			} else {
+				uint8 a;
+				src.format.colorToARGB(raw, a, r, g, b);
+			}
+
+			uint8 destA, destR, destG, destB;
+			dest->format.colorToARGB(dest->getPixel(x, y), destA, destR, destG, destB);
+			r = (r * alpha + destR * (255 - alpha)) / 255;
+			g = (g * alpha + destG * (255 - alpha)) / 255;
+			b = (b * alpha + destB * (255 - alpha)) / 255;
+			dest->setPixel(x, y, dest->format.ARGBToColor(255, r, g, b));
+		}
+	}
+
+	dest->addDirtyRect(clipped);
+}
+
 bool VisualElement::renderRotated(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey) {
 	return renderTransformed(window, src, srcRect, destOrigin, hasTransColor, transColor, palette, cacheKey, _rotationAngle, _rotationAxisOffset, _rotationScaleX, _rotationScaleY);
 }

@@ -2954,6 +2954,7 @@ protected:
 	// destOrigin is where the top-left of srcRect goes without rotation. Pixels equal to transColor are
 	// transparent if hasTransColor. palette is used for 8-bit sources. cacheKey identifies the source contents.
 	bool renderRotated(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey);
+	void renderFaded(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Rect &destRect, bool hasTransColor, uint32 transColor, const byte *palette, uint8 alpha);
 	bool renderTransformed(Window *window, const Graphics::ManagedSurface &src, const Common::Rect &srcRect, const Common::Point &destOrigin, bool hasTransColor, uint32 transColor, const byte *palette, uint32 cacheKey, double angleDegrees, const Common::Point &axisOffset, double scaleX, double scaleY);
 
 	// Write proxy for "asset", which only accepts the "preload" hint
