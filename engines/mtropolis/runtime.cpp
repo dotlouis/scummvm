@@ -9773,7 +9773,7 @@ MiniscriptInstructionOutcome VisualElement::writeRefAttribute(MiniscriptThread *
 		DynamicValueWriteOrRefAttribFuncHelper<VisualElement, &VisualElement::scriptSetSize, &VisualElement::scriptWriteRefSizeAttribute>::create(this, writeProxy);
 		return kMiniscriptInstructionOutcomeContinue;
 	} else if (attrib == "globalposition") {
-		DynamicValueWriteFuncHelper<VisualElement, &VisualElement::scriptSetGlobalPosition, true>::create(this, writeProxy);
+		DynamicValueWriteOrRefAttribFuncHelper<VisualElement, &VisualElement::scriptSetGlobalPosition, &VisualElement::scriptWriteRefGlobalPositionAttribute>::create(this, writeProxy);
 		return kMiniscriptInstructionOutcomeContinue;
 	} else if (attrib == "centerposition") {
 		DynamicValueWriteOrRefAttribFuncHelper<VisualElement, &VisualElement::scriptSetCenterPosition, &VisualElement::scriptWriteRefCenterPositionAttribute>::create(this, writeProxy);
@@ -10286,6 +10286,27 @@ MiniscriptInstructionOutcome VisualElement::scriptSetGlobalPosition(MiniscriptTh
 	return scriptSetPosition(thread, relativePoint);
 }
 
+// One coordinate of the global position: the relative position moves by the same amount
+MiniscriptInstructionOutcome VisualElement::scriptSetGlobalPositionX(MiniscriptThread *thread, const DynamicValue &dest) {
+	int32 asInteger = 0;
+	if (!dest.roundToInt(asInteger))
+		return kMiniscriptInstructionOutcomeFailed;
+
+	DynamicValue relativeX;
+	relativeX.setInt(asInteger - getGlobalPosition().x + _rect.left);
+	return scriptSetPositionX(thread, relativeX);
+}
+
+MiniscriptInstructionOutcome VisualElement::scriptSetGlobalPositionY(MiniscriptThread *thread, const DynamicValue &dest) {
+	int32 asInteger = 0;
+	if (!dest.roundToInt(asInteger))
+		return kMiniscriptInstructionOutcomeFailed;
+
+	DynamicValue relativeY;
+	relativeY.setInt(asInteger - getGlobalPosition().y + _rect.top);
+	return scriptSetPositionY(thread, relativeY);
+}
+
 MiniscriptInstructionOutcome VisualElement::scriptSetPositionX(MiniscriptThread *thread, const DynamicValue &dest) {
 	int32 asInteger = 0;
 	if (!dest.roundToInt(asInteger))
@@ -10439,6 +10460,18 @@ MiniscriptInstructionOutcome VisualElement::scriptWriteRefPositionAttribute(Mini
 		return kMiniscriptInstructionOutcomeContinue;
 	} else if (attrib == "y") {
 		DynamicValueWriteFuncHelper<VisualElement, &VisualElement::scriptSetPositionY, true>::create(this, writeProxy);
+		return kMiniscriptInstructionOutcomeContinue;
+	}
+
+	return kMiniscriptInstructionOutcomeFailed;
+}
+
+MiniscriptInstructionOutcome VisualElement::scriptWriteRefGlobalPositionAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib) {
+	if (attrib == "x") {
+		DynamicValueWriteFuncHelper<VisualElement, &VisualElement::scriptSetGlobalPositionX, true>::create(this, writeProxy);
+		return kMiniscriptInstructionOutcomeContinue;
+	} else if (attrib == "y") {
+		DynamicValueWriteFuncHelper<VisualElement, &VisualElement::scriptSetGlobalPositionY, true>::create(this, writeProxy);
 		return kMiniscriptInstructionOutcomeContinue;
 	}
 

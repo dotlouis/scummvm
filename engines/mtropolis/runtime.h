@@ -2969,6 +2969,8 @@ protected:
 	MiniscriptInstructionOutcome scriptSetDirect(MiniscriptThread *thread, const DynamicValue &dest);
 	MiniscriptInstructionOutcome scriptSetPosition(MiniscriptThread *thread, const DynamicValue &dest);
 	MiniscriptInstructionOutcome scriptSetGlobalPosition(MiniscriptThread *thread, const DynamicValue &dest);
+	MiniscriptInstructionOutcome scriptSetGlobalPositionX(MiniscriptThread *thread, const DynamicValue &dest);
+	MiniscriptInstructionOutcome scriptSetGlobalPositionY(MiniscriptThread *thread, const DynamicValue &dest);
 	MiniscriptInstructionOutcome scriptSetPositionX(MiniscriptThread *thread, const DynamicValue &dest);
 	MiniscriptInstructionOutcome scriptSetPositionY(MiniscriptThread *thread, const DynamicValue &dest);
 	MiniscriptInstructionOutcome scriptSetCenterPosition(MiniscriptThread *thread, const DynamicValue &dest);
@@ -2981,6 +2983,7 @@ protected:
 	MiniscriptInstructionOutcome scriptSetLayer(MiniscriptThread *thread, const DynamicValue &dest);
 
 	MiniscriptInstructionOutcome scriptWriteRefPositionAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib);
+	MiniscriptInstructionOutcome scriptWriteRefGlobalPositionAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib);
 	MiniscriptInstructionOutcome scriptWriteRefSizeAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib);
 	MiniscriptInstructionOutcome scriptWriteRefCenterPositionAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib);
 
