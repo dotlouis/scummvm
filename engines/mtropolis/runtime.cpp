@@ -9884,12 +9884,12 @@ void VisualElement::handleDragMotion(Runtime *runtime, const Common::Point &init
 
 		if (targetPoint.y > maxY)
 			targetPoint.y = maxY;
-
-		if (_hooks)
-			_hooks->onSetPosition(runtime, this, Common::Point(_rect.left, _rect.top), targetPoint);
-
-		offsetTranslate(targetPoint.x - _rect.left, targetPoint.y - _rect.top, false);
 	}
+
+	if (_hooks)
+		_hooks->onSetPosition(runtime, this, Common::Point(_rect.left, _rect.top), targetPoint);
+
+	offsetTranslate(targetPoint.x - _rect.left, targetPoint.y - _rect.top, false);
 }
 
 VThreadState VisualElement::offsetTranslateTask(const OffsetTranslateTaskData &data) {
