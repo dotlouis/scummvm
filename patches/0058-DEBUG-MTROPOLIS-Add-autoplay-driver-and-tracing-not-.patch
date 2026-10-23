@@ -1,7 +1,7 @@
-From a5492af07d31a6a531ef225cfb7cc9efe1e61afb Mon Sep 17 00:00:00 2001
+From 0436b9f091efdc619da7ee95aae96bbac790f3d9 Mon Sep 17 00:00:00 2001
 From: dotlouis <1891109+dotlouis@users.noreply.github.com>
 Date: Fri, 9 Oct 2026 16:38:31 -0700
-Subject: [PATCH 56/56] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
+Subject: [PATCH 58/58] DEBUG: MTROPOLIS: Add autoplay driver and tracing (not
  for upstream)
 
 Local reverse-engineering tools, not meant to be submitted:
@@ -2676,7 +2676,7 @@ index 558f400119..d4585085d4 100644
  }
  
 diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
-index f4c72f6e59..b982c9d811 100644
+index f9ba1c76b7..458096dfa0 100644
 --- a/engines/mtropolis/runtime.cpp
 +++ b/engines/mtropolis/runtime.cpp
 @@ -4125,6 +4125,34 @@ MiniscriptInstructionOutcome Structural::scriptSetLoop(MiniscriptThread *thread,
@@ -2876,7 +2876,7 @@ index f4c72f6e59..b982c9d811 100644
  			_mouseTrackingObject = tracked->getSelfReference().staticCast<Structural>();
  			_mouseTrackingDragStart = _cachedMousePosition;
 diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
-index 8ccd9cbde3..21a88fa719 100644
+index 0e6d8cfc4e..2fef5e41ce 100644
 --- a/engines/mtropolis/runtime.h
 +++ b/engines/mtropolis/runtime.h
 @@ -1731,6 +1731,9 @@ public:

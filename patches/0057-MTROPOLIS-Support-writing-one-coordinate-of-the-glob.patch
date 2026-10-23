@@ -1,0 +1,103 @@
+From a45869b77a3d36974a5d1e0eb43f9d95993010b6 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 18:19:31 +0200
+Subject: [PATCH 57/58] MTROPOLIS: Support writing one coordinate of the global
+ position
+
+Scripts can write globalposition as a point, but writing its x or y alone
+failed with "Can't write to attribute 'x'". Uncle Albert's Fabulous
+Voyage keeps the hint papers it lets the player drag on the album pages
+this way, so they could be dragged off the page.
+
+Accept writes to globalposition.x and globalposition.y, as for position.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 35 ++++++++++++++++++++++++++++++++++-
+ engines/mtropolis/runtime.h   |  3 +++
+ 2 files changed, 37 insertions(+), 1 deletion(-)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index e5d77845b4..f9ba1c76b7 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -9773,7 +9773,7 @@ MiniscriptInstructionOutcome VisualElement::writeRefAttribute(MiniscriptThread *
+ 		DynamicValueWriteOrRefAttribFuncHelper<VisualElement, &VisualElement::scriptSetSize, &VisualElement::scriptWriteRefSizeAttribute>::create(this, writeProxy);
+ 		return kMiniscriptInstructionOutcomeContinue;
+ 	} else if (attrib == "globalposition") {
+-		DynamicValueWriteFuncHelper<VisualElement, &VisualElement::scriptSetGlobalPosition, true>::create(this, writeProxy);
++		DynamicValueWriteOrRefAttribFuncHelper<VisualElement, &VisualElement::scriptSetGlobalPosition, &VisualElement::scriptWriteRefGlobalPositionAttribute>::create(this, writeProxy);
+ 		return kMiniscriptInstructionOutcomeContinue;
+ 	} else if (attrib == "centerposition") {
+ 		DynamicValueWriteOrRefAttribFuncHelper<VisualElement, &VisualElement::scriptSetCenterPosition, &VisualElement::scriptWriteRefCenterPositionAttribute>::create(this, writeProxy);
+@@ -10286,6 +10286,27 @@ MiniscriptInstructionOutcome VisualElement::scriptSetGlobalPosition(MiniscriptTh
+ 	return scriptSetPosition(thread, relativePoint);
+ }
+ 
++// One coordinate of the global position: the relative position moves by the same amount
++MiniscriptInstructionOutcome VisualElement::scriptSetGlobalPositionX(MiniscriptThread *thread, const DynamicValue &dest) {
++	int32 asInteger = 0;
++	if (!dest.roundToInt(asInteger))
++		return kMiniscriptInstructionOutcomeFailed;
++
++	DynamicValue relativeX;
++	relativeX.setInt(asInteger - getGlobalPosition().x + _rect.left);
++	return scriptSetPositionX(thread, relativeX);
++}
++
++MiniscriptInstructionOutcome VisualElement::scriptSetGlobalPositionY(MiniscriptThread *thread, const DynamicValue &dest) {
++	int32 asInteger = 0;
++	if (!dest.roundToInt(asInteger))
++		return kMiniscriptInstructionOutcomeFailed;
++
++	DynamicValue relativeY;
++	relativeY.setInt(asInteger - getGlobalPosition().y + _rect.top);
++	return scriptSetPositionY(thread, relativeY);
++}
++
+ MiniscriptInstructionOutcome VisualElement::scriptSetPositionX(MiniscriptThread *thread, const DynamicValue &dest) {
+ 	int32 asInteger = 0;
+ 	if (!dest.roundToInt(asInteger))
+@@ -10445,6 +10466,18 @@ MiniscriptInstructionOutcome VisualElement::scriptWriteRefPositionAttribute(Mini
+ 	return kMiniscriptInstructionOutcomeFailed;
+ }
+ 
++MiniscriptInstructionOutcome VisualElement::scriptWriteRefGlobalPositionAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib) {
++	if (attrib == "x") {
++		DynamicValueWriteFuncHelper<VisualElement, &VisualElement::scriptSetGlobalPositionX, true>::create(this, writeProxy);
++		return kMiniscriptInstructionOutcomeContinue;
++	} else if (attrib == "y") {
++		DynamicValueWriteFuncHelper<VisualElement, &VisualElement::scriptSetGlobalPositionY, true>::create(this, writeProxy);
++		return kMiniscriptInstructionOutcomeContinue;
++	}
++
++	return kMiniscriptInstructionOutcomeFailed;
++}
++
+ MiniscriptInstructionOutcome VisualElement::scriptWriteRefCenterPositionAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib) {
+ 	if (attrib == "x") {
+ 		DynamicValueWriteFuncHelper<VisualElement, &VisualElement::scriptSetCenterPositionX, true>::create(this, writeProxy);
+diff --git a/engines/mtropolis/runtime.h b/engines/mtropolis/runtime.h
+index 8ccd9cbde3..0e6d8cfc4e 100644
+--- a/engines/mtropolis/runtime.h
++++ b/engines/mtropolis/runtime.h
+@@ -2969,6 +2969,8 @@ protected:
+ 	MiniscriptInstructionOutcome scriptSetDirect(MiniscriptThread *thread, const DynamicValue &dest);
+ 	MiniscriptInstructionOutcome scriptSetPosition(MiniscriptThread *thread, const DynamicValue &dest);
+ 	MiniscriptInstructionOutcome scriptSetGlobalPosition(MiniscriptThread *thread, const DynamicValue &dest);
++	MiniscriptInstructionOutcome scriptSetGlobalPositionX(MiniscriptThread *thread, const DynamicValue &dest);
++	MiniscriptInstructionOutcome scriptSetGlobalPositionY(MiniscriptThread *thread, const DynamicValue &dest);
+ 	MiniscriptInstructionOutcome scriptSetPositionX(MiniscriptThread *thread, const DynamicValue &dest);
+ 	MiniscriptInstructionOutcome scriptSetPositionY(MiniscriptThread *thread, const DynamicValue &dest);
+ 	MiniscriptInstructionOutcome scriptSetCenterPosition(MiniscriptThread *thread, const DynamicValue &dest);
+@@ -2981,6 +2983,7 @@ protected:
+ 	MiniscriptInstructionOutcome scriptSetLayer(MiniscriptThread *thread, const DynamicValue &dest);
+ 
+ 	MiniscriptInstructionOutcome scriptWriteRefPositionAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib);
++	MiniscriptInstructionOutcome scriptWriteRefGlobalPositionAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib);
+ 	MiniscriptInstructionOutcome scriptWriteRefSizeAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib);
+ 	MiniscriptInstructionOutcome scriptWriteRefCenterPositionAttribute(MiniscriptThread *thread, DynamicValueWriteProxy &writeProxy, const Common::String &attrib);
+ 
+-- 
+2.47.3
+

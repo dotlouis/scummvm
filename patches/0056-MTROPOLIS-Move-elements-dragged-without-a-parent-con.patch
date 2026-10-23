@@ -1,0 +1,43 @@
+From 8424c373bcfbe2558bc50d3f010a3ce3c7309db1 Mon Sep 17 00:00:00 2001
+From: dotlouis <1891109+dotlouis@users.noreply.github.com>
+Date: Fri, 23 Oct 2026 18:12:57 +0200
+Subject: [PATCH 56/58] MTROPOLIS: Move elements dragged without a parent
+ constraint
+
+Drag motion only moved the dragged element when its modifier constrained
+it to its parent: the translation was inside the constraint block, so
+unconstrained drag motion did nothing. Uncle Albert's Fabulous Voyage
+drags the crumpled hint papers of the album pages this way (its scripts
+keep them on the page), and they could not be moved.
+
+Apply the constraint when there is one, then always move the element.
+
+Assisted-by: Claude:claude-opus-5-5
+---
+ engines/mtropolis/runtime.cpp | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/engines/mtropolis/runtime.cpp b/engines/mtropolis/runtime.cpp
+index f4c72f6e59..e5d77845b4 100644
+--- a/engines/mtropolis/runtime.cpp
++++ b/engines/mtropolis/runtime.cpp
+@@ -9884,12 +9884,12 @@ void VisualElement::handleDragMotion(Runtime *runtime, const Common::Point &init
+ 
+ 		if (targetPoint.y > maxY)
+ 			targetPoint.y = maxY;
++	}
+ 
+-		if (_hooks)
+-			_hooks->onSetPosition(runtime, this, Common::Point(_rect.left, _rect.top), targetPoint);
++	if (_hooks)
++		_hooks->onSetPosition(runtime, this, Common::Point(_rect.left, _rect.top), targetPoint);
+ 
+-		offsetTranslate(targetPoint.x - _rect.left, targetPoint.y - _rect.top, false);
+-	}
++	offsetTranslate(targetPoint.x - _rect.left, targetPoint.y - _rect.top, false);
+ }
+ 
+ VThreadState VisualElement::offsetTranslateTask(const OffsetTranslateTaskData &data) {
+-- 
+2.47.3
+
